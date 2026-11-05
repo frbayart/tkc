@@ -65,22 +65,27 @@ This is an architectural objective, not a statement about legal obligations in a
 
 ## Trust boundaries
 
-```text
-                  PROVIDER INFRASTRUCTURE
-       ┌───────────────────────────────────────┐
-       │ Identity / Policy / Signaling / SFU  │
-       │ Metadata / Ciphertext / Object Store │
-       │                                       │
-       │           NO CONTENT KEYS             │
-       └──────────────────┬────────────────────┘
-                          │ encrypted data
-            ┌─────────────┴─────────────┐
-            │                           │
-        FAMILY A                    FAMILY B
-     Parent devices              Parent devices
-     Child devices               Child devices
-          │                           │
-          └──── authorized relationship ────┘
+```mermaid
+flowchart TB
+    subgraph P["Provider infrastructure — NO CONTENT KEYS"]
+        direction LR
+        S["Identity · Policy · Signaling · SFU"]
+        D[("Metadata · Ciphertext · Object store")]
+    end
+    subgraph FA["Family A"]
+        direction TB
+        PA["Parent devices"]
+        CA["Child devices"]
+    end
+    subgraph FB["Family B"]
+        direction TB
+        PB["Parent devices"]
+        CB["Child devices"]
+    end
+    P <-->|"encrypted data"| FA
+    P <-->|"encrypted data"| FB
+    CA -.- REL(["Authorized relationship"])
+    CB -.- REL
 ```
 
 ## Fundamental invariants

@@ -36,20 +36,19 @@ Call metadata and call content have separate retention policies.
 
 Before establishing a call, the service verifies the effective relationship policy.
 
-```text
-Child A
-   │
-   ▼
-Signaling / Authorization
-   │
-   ├── relationship active?
-   ├── audio/video permitted?
-   ├── current time permitted?
-   ├── duration limit?
-   └── recording policy?
-   │
-   ▼
-Media infrastructure
+```mermaid
+flowchart TD
+    C["Child A"] --> S["Signaling / authorization"]
+    S --> Q1{"Relationship active?"}
+    Q1 -->|yes| Q2{"Audio/video permitted?"}
+    Q2 -->|yes| Q3{"Current time permitted?"}
+    Q3 -->|yes| Q4{"Within duration limits?"}
+    Q4 -->|yes| R["Apply recording policy"]
+    R --> M["Media infrastructure"]
+    Q1 -->|no| X["Call rejected"]
+    Q2 -->|no| X
+    Q3 -->|no| X
+    Q4 -->|no| X
 ```
 
 Restrictions must not rely exclusively on the Flutter client.
@@ -58,10 +57,10 @@ Restrictions must not rely exclusively on the Flutter client.
 
 An SFU-based architecture is a likely candidate for audio/video calls.
 
-```text
-Child A ───┐
-           ├──── SFU ──── Child B
-Child B ───┘
+```mermaid
+flowchart LR
+    A["Child A"] <-->|"E2EE media"| SFU["SFU"]
+    SFU <-->|"E2EE media"| B["Child B"]
 ```
 
 The final choice of SFU is not made in v0.1.
@@ -86,16 +85,16 @@ Authorized parents should be able to see call history and, while the recording r
 
 Conceptually:
 
-```text
-Parent device
-    │
-    ├── fetch encrypted recording
-    ├── obtain/use authorized key material locally
-    ├── decrypt locally
-    └── play
-
-Provider
-    └── never receives plaintext playback
+```mermaid
+sequenceDiagram
+    participant P as Parent device
+    participant S as Provider storage
+    P->>S: Fetch encrypted recording
+    S-->>P: Ciphertext only
+    Note over P: Obtain/use authorized key material locally
+    P->>P: Decrypt locally
+    P->>P: Play
+    Note over S: Never receives plaintext playback
 ```
 
 ## Recording indicator

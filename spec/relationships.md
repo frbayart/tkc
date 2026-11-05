@@ -16,20 +16,25 @@ Two children who are physically together may initiate a contact exchange using a
 
 Example:
 
-```text
-Child A                Child B
-   │                       │
-   └──── ephemeral QR ────►│
-                           │
-                 Pending relationship
-                           │
-             ┌─────────────┴─────────────┐
-             ▼                           ▼
-        Parent A                     Parent B
-          approve                      approve
-             └─────────────┬─────────────┘
-                           ▼
-                  Active relationship
+```mermaid
+sequenceDiagram
+    participant CA as Child A
+    participant CB as Child B
+    participant S as Service
+    participant PA as Parent A
+    participant PB as Parent B
+    CA->>CB: Ephemeral QR code (short-lived, single use)
+    CB->>S: Redeem code
+    S->>S: Create pending relationship
+    par Family A
+        S->>PA: Approval request
+        PA->>S: Approve
+    and Family B
+        S->>PB: Approval request
+        PB->>S: Approve
+    end
+    S-->>CA: Active relationship
+    S-->>CB: Active relationship
 ```
 
 The exchange token should be short-lived and single-use.
@@ -64,21 +69,26 @@ Both families can be required to approve it before activation.
 
 Suggested states:
 
-```text
-proposed
-   ↓
-pending_family_a
-   ↓
-pending_family_b
-   ↓
-active
-   ↓
-suspended
-   ↓
-revoked
+```mermaid
+stateDiagram-v2
+    [*] --> proposed
+    proposed --> pending_family_a: family B approved
+    proposed --> pending_family_b: family A approved
+    pending_family_a --> active: family A approves
+    pending_family_b --> active: family B approves
+    proposed --> revoked: rejected
+    pending_family_a --> revoked: rejected
+    pending_family_b --> revoked: rejected
+    active --> suspended
+    suspended --> active: resumed
+    active --> revoked
+    suspended --> revoked
+    revoked --> [*]
 ```
 
-The exact workflow may allow both approvals to occur in either order.
+Both approvals may occur in either order. Either family can reject a pending relationship, and a suspended relationship can be resumed.
+
+In the database (`docs/data-model.md`), `pending_family_a` and `pending_family_b` are represented by the single status `pending` plus the per-family approval timestamps `approved_a_at` / `approved_b_at`.
 
 ## Revocation
 

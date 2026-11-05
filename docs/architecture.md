@@ -25,33 +25,19 @@ The client is responsible for:
 
 ## Candidate backend decomposition
 
-```text
-Flutter clients
-      │
-      ├──────── HTTPS/API ────────┐
-      │                           ▼
-      │                     API / Identity
-      │                           │
-      │                     Relationship
-      │                           │
-      │                        Policy
-      │
-      ├──────── Messaging ───────► Message transport
-      │                              │
-      │                              ▼
-      │                           PostgreSQL
-      │                         (ciphertext + metadata)
-      │
-      └──────── WebRTC ─────────► Signaling
-                                     │
-                                     ▼
-                                    SFU
-                                     │
-                                     ▼
-                             encrypted recordings
-                                     │
-                                     ▼
-                                Object Storage
+```mermaid
+flowchart TD
+    C["Flutter clients"]
+    subgraph Provider["Provider infrastructure"]
+        API["API / Identity"] --> REL["Relationship"] --> POL["Policy"]
+        MSG["Message transport"] --> PG[("PostgreSQL<br/>ciphertext + metadata")]
+        SIG["Signaling"] --> SFU["SFU"] --> REC["Encrypted recordings"] --> OBJ[("Object storage")]
+        MSG -.->|"checks policy"| POL
+        SIG -.->|"checks policy"| POL
+    end
+    C -->|"HTTPS / API"| API
+    C -->|"Messaging"| MSG
+    C -->|"WebRTC"| SIG
 ```
 
 Redis or another ephemeral data service may be used for presence, signaling or transient coordination where justified.

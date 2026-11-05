@@ -11,18 +11,14 @@ They must not be readable by the service provider solely from server-side data.
 
 ## Conceptual model
 
-```text
-Conversation Alice ↔ Bob
-
-Conversation key material
-       │
-       ├── accessible to Alice authorized device(s)
-       ├── accessible to Bob authorized device(s)
-       ├── accessible to Alice authorized parent device(s)
-       └── accessible to Bob authorized parent device(s)
-
-Provider:
-       └── ciphertext only
+```mermaid
+flowchart LR
+    K["Conversation key material<br/>Alice ↔ Bob"]
+    K --> AD["Alice's authorized devices"]
+    K --> BD["Bob's authorized devices"]
+    K --> AP["Alice's authorized parent devices"]
+    K --> BP["Bob's authorized parent devices"]
+    PR["Provider<br/>ciphertext only — no key material"]
 ```
 
 ## Parent access
