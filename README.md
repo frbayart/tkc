@@ -35,16 +35,35 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 
 ## Documents
 
-- [Architecture](architecture.md)
-- [Trust Model](trust-model.md)
-- [Threat Model](threat-model.md)
-- [Identity and Families](identity-family.md)
-- [Contacts and Relationships](relationships.md)
-- [Relationship Policies](relationship-policies.md)
-- [Messaging and Cryptography](messaging-cryptography.md)
-- [Calls and Recording](calls-recording.md)
-- [Retention](retention.md)
-- [Open Project Principles](open-project.md)
+- [Architecture](docs/architecture.md)
+- [Trust Model](docs/trust-model.md)
+- [Threat Model](docs/threat-model.md)
+- [Identity and Families](spec/identity-family.md)
+- [Contacts and Relationships](spec/relationships.md)
+- [Relationship Policies](spec/relationship-policies.md)
+- [Messaging and Cryptography](spec/messaging-cryptography.md)
+- [Calls and Recording](spec/calls-recording.md)
+- [Retention](spec/retention.md)
+- [Open Project Principles](docs/open-project.md)
+- [Architecture Decision Records](docs/adr/)
+
+## Repository layout
+
+```text
+docs/        architecture, trust/threat models, ADRs
+spec/        normative product and protocol specifications
+server/      Go backend (modular monolith)
+apps/flutter reference mobile client (planned)
+protocol/    wire/cryptographic protocol definitions (planned)
+security/    security reviews and reports (planned)
+```
+
+## Development
+
+```bash
+cd server
+make test
+```
 
 ## Important status note
 

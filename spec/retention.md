@@ -78,3 +78,14 @@ Parents should be able to understand:
 ## Open questions
 
 Final retention defaults require both product and legal review, particularly because the retained content concerns minors and may contain highly private domestic audio/video.
+
+## Reference implementation notes
+
+`server/internal/retention` implements retention as a pure function `Compute(recordings, policy, now)`. Recordings are ranked from the most recent (ties broken by ID):
+
+- **recent:** kept while younger than `retention_days` and, if `keep_recent_count > 0`, ranked below it;
+- **long term:** kept while ranked below `keep_long_term_count` and younger than `long_term_max_age_days`;
+- otherwise deleted, with reason `count_exceeded` (still young enough but outside the count) or `expired`;
+- if recording is disabled by the effective policy, all recordings are deleted (`recording_disabled`).
+
+Each kept recording carries its reason and an `expires_at` (deletion at the latest), shown to parents. A zero age limit keeps nothing under that rule, so retention is always finite. Deletion is final: a recording deleted at one instant is never kept at a later instant under the same policy.
