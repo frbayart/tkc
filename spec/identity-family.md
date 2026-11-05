@@ -6,13 +6,13 @@
 
 A Family is the primary administrative trust domain.
 
-```text
-Family
- ├── Parent / Guardian A
- ├── Parent / Guardian B
- ├── Child A
- ├── Child B
- └── Devices
+```mermaid
+flowchart TD
+    F["Family"] --> G1["Parent / Guardian A"]
+    F --> G2["Parent / Guardian B"]
+    F --> K1["Child A"]
+    F --> K2["Child B"]
+    G1 & G2 & K1 & K2 --> D["Devices<br/>(one or more per member)"]
 ```
 
 A family may contain one or more authorized guardians. The design must not assume a single-parent or two-parent household.

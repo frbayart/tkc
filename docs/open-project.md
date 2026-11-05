@@ -52,6 +52,10 @@ Specifications should be versioned independently from application releases when 
 
 Breaking protocol/security changes should have explicit migration documentation.
 
+## Diagrams
+
+Diagrams in Markdown documents use [Mermaid](https://mermaid.js.org/) code blocks (`flowchart`, `sequenceDiagram`, `stateDiagram-v2`, `erDiagram`...), which GitHub renders natively. ASCII-art diagrams should not be added. Directory trees and example data may stay as plain text blocks.
+
 ## Suggested repository layout
 
 ```text

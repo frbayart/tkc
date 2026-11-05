@@ -38,6 +38,7 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 - [Architecture](docs/architecture.md)
 - [Trust Model](docs/trust-model.md)
 - [Threat Model](docs/threat-model.md)
+- [Data Model](docs/data-model.md)
 - [Identity and Families](spec/identity-family.md)
 - [Contacts and Relationships](spec/relationships.md)
 - [Relationship Policies](spec/relationship-policies.md)
@@ -63,6 +64,12 @@ security/    security reviews and reports (planned)
 ```bash
 cd server
 make test
+```
+
+Database integration tests run when `TKC_TEST_DATABASE_URL` points to a PostgreSQL ≥ 13 database, for example:
+
+```bash
+TKC_TEST_DATABASE_URL=postgres://tkc:tkc@localhost:5432/tkc_test?sslmode=disable make test
 ```
 
 ## Important status note
