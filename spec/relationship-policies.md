@@ -101,3 +101,15 @@ Time restrictions must have explicit time-zone semantics.
 A recommended model is to evaluate each family's restriction in that child's configured home time zone, then intersect the resulting allowed periods.
 
 The final behavior must be clearly visible to parents to avoid ambiguous rules during travel or daylight-saving changes.
+
+## Reference implementation notes
+
+The reference implementation lives in `server/internal/policy`. It fixes the following semantics, which remain open to review:
+
+- **Fail closed:** an empty policy allows nothing; an empty call schedule allows no calls.
+- **Booleans** are intersected with AND; **numeric limits** take the minimum, where `0` means "no limit from this family".
+- **Video calls** require both the video and the audio permission.
+- **Schedules** are expanded in each child's home time zone into absolute intervals, then intersected. Windows follow DST (08:00–20:00 local stays 08:00–20:00 local). A window whose end is before its start crosses midnight.
+- **Daily allowance** is counted per family, in that family's local day.
+- **Maximum call duration** granted by the authorization layer is the minimum of the per-call limit, the remaining allowed window, and the remaining daily allowances.
+- **Recording** is a supervision measure, not a capability: it applies if either family requires it, and retention is bounded by the shortest limits among the families requiring it. Recording requires a finite retention period. This needs product and legal review.
