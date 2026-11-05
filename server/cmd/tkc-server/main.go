@@ -12,36 +12,69 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/frbayart/tkc/server/internal/httpapi"
+	"github.com/frbayart/tkc/server/internal/identity"
+	"github.com/frbayart/tkc/server/internal/store"
 )
 
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
+	dbURL := flag.String("database-url", os.Getenv("TKC_DATABASE_URL"), "PostgreSQL URL (default $TKC_DATABASE_URL)")
+	migrate := flag.Bool("migrate", true, "apply pending database migrations at startup")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           httpapi.NewRouter(),
-		ReadHeaderTimeout: 10 * time.Second,
+	if err := run(*addr, *dbURL, *migrate, logger); err != nil {
+		logger.Error("fatal", "err", err)
+		os.Exit(1)
 	}
+}
 
+func run(addr, dbURL string, migrate bool, logger *slog.Logger) error {
+	if dbURL == "" {
+		return errors.New("database URL required (-database-url or TKC_DATABASE_URL)")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		logger.Info("listening", "addr", *addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server failed", "err", err)
-			os.Exit(1)
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if migrate {
+		applied, err := store.Migrate(ctx, pool)
+		if err != nil {
+			return err
 		}
+		logger.Info("migrations applied", "versions", applied)
+	}
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           httpapi.NewRouter(&httpapi.API{Identity: identity.New(pool), Logger: logger}),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+
+	errc := make(chan error, 1)
+	go func() {
+		logger.Info("listening", "addr", addr)
+		errc <- srv.ListenAndServe()
 	}()
 
-	<-ctx.Done()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+	case <-ctx.Done():
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown failed", "err", err)
-	}
+	return srv.Shutdown(shutdownCtx)
 }

@@ -130,6 +130,10 @@ Encryption does not hide metadata. With this schema, the provider can see:
 
 The provider **cannot** see names, profile pictures, message content, attachment content or media. Reducing the metadata above (e.g. sealed sender, padding) is tracked as future work in the threat model.
 
+## Authentication tables
+
+`device_enrollments`, `auth_challenges` and `sessions` (migration `0002`) store only SHA-256 hashes of enrollment codes, nonces and session tokens. See [protocol/device-auth.md](../protocol/device-auth.md).
+
 ## Migrations
 
 Migrations are plain SQL files embedded in the server binary (`NNNN_description.sql`). `store.Migrate` applies the pending ones, each in its own transaction, under a PostgreSQL advisory lock, so several instances can start at the same time.

@@ -46,6 +46,7 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 - [Calls and Recording](spec/calls-recording.md)
 - [Retention](spec/retention.md)
 - [Open Project Principles](docs/open-project.md)
+- [Device Enrollment and Authentication](protocol/device-auth.md)
 - [Architecture Decision Records](docs/adr/)
 
 ## Repository layout

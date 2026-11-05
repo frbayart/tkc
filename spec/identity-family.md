@@ -57,6 +57,8 @@ Possible authorization mechanisms include:
 
 A normal account password alone should not silently grant historical decryption capability.
 
+The enrollment, approval and authentication protocol is specified in [protocol/device-auth.md](../protocol/device-auth.md).
+
 ## Child devices
 
 Child devices receive only the keys and capabilities necessary for the child's authorized relationships.
