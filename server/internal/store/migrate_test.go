@@ -175,8 +175,8 @@ func TestSchemaConstraints(t *testing.T) {
 			at = time.Now()
 		}
 		_, err := pool.Exec(ctx, `INSERT INTO relationships
-			(child_a, family_a, child_b, family_b, status, origin, approved_a_at, approved_b_at)
-			VALUES ($1, $2, $3, $4, $5, 'in_person', $6, $6)`,
+			(child_a, family_a, child_b, family_b, status, origin, approved_a_at, approved_b_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, 'in_person', $6, $6, now(), now())`,
 			childA, familyA, childB, familyB, status, at)
 		return err
 	}

@@ -48,6 +48,7 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 - [Open Project Principles](docs/open-project.md)
 - [Device Enrollment and Authentication](protocol/device-auth.md)
 - [Family Connections](protocol/family-connections.md)
+- [Child Relationships](protocol/child-relationships.md)
 - [Architecture Decision Records](docs/adr/)
 
 ## Repository layout

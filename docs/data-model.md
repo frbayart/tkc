@@ -28,6 +28,8 @@ erDiagram
     devices ||--o{ messages : sends
     relationships ||--o{ calls : has
     calls ||--o| recordings : "may produce"
+    family_connections ||--o{ relationship_proposals : carries
+    relationship_proposals |o--o| relationships : "accepted into"
 
     families {
         uuid id PK
@@ -76,8 +78,17 @@ erDiagram
         uuid child_b FK
         text status "proposed | pending | active | suspended | revoked"
         text origin "in_person | parent"
+        uuid suspended_by FK "only it can resume"
         timestamptz approved_a_at
         timestamptz approved_b_at
+    }
+    relationship_proposals {
+        uuid id PK
+        uuid connection_id FK
+        uuid proposer_child FK
+        uuid target_family FK
+        jsonb proposer_policy
+        text status "pending | accepted | declined | cancelled"
     }
     relationship_policies {
         uuid relationship_id PK
@@ -117,7 +128,8 @@ erDiagram
 | `devices` | `revoked` ⇔ `revoked_at` set; identity keys are unique |
 | `family_connections` | one row per pair of families, canonical order `family_a < family_b`; the issuer is one of the pair; `active` requires `confirmed_at`; `revoked` ⇔ `revoked_at` |
 | `invitations` | only the token hash is stored; `child_exchange` ⇔ a child **of the issuer family**; cannot be both consumed and revoked; finite expiry |
-| `relationships` | each child belongs to the stated family; canonical order `child_a < child_b`; `active`/`suspended` require both parental approvals; at most one non-revoked relationship per pair |
+| `relationships` | each child belongs to the stated family; canonical order `child_a < child_b`; `active`/`suspended` require both parental approvals, `pending` exactly one, `proposed` none; children of different families; `suspended` ⇔ `suspended_by` set; at most one non-revoked relationship per pair |
+| `relationship_proposals` | the proposed child belongs to the proposing family; proposer and target families differ; `accepted` requires the created relationship |
 | `calls` | `authorized_until` (from the policy engine) is after the start; `ended_at` ⇔ `termination_reason` |
 | `recordings` | one per call; `deleted_at` ⇔ `deletion_reason` |
 
