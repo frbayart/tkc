@@ -79,6 +79,8 @@ Parents should be able to understand:
 
 Communication involving minors may later be needed as **evidence**: legal proceedings, harassment, or psychological follow-up. Evidence matters to **both families** of a relationship, not only to the family that ends it.
 
+How evidence is structured — no anonymization, versioned profiles, append-only event log — is specified in [evidence.md](evidence.md).
+
 Rules implemented so far:
 
 - **Ending a relationship never deletes it.** Revoking, blocking, or revoking the family connection keeps the relationship, its history and its (encrypted) messages; both families' parents can still see it, with who revoked it and why.

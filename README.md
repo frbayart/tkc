@@ -45,6 +45,7 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 - [Messaging and Cryptography](spec/messaging-cryptography.md)
 - [Calls and Recording](spec/calls-recording.md)
 - [Retention](spec/retention.md)
+- [Evidence](spec/evidence.md)
 - [Open Project Principles](docs/open-project.md)
 - [Device Enrollment and Authentication](protocol/device-auth.md)
 - [Family Connections](protocol/family-connections.md)

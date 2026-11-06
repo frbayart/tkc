@@ -80,7 +80,7 @@ Consequences:
 A parent can remove any member of their family, including another guardian or themselves (`DELETE /v1/users/{id}`). Removal happens in two stages:
 
 1. **Immediately**, the member is retired: hidden from the family, all devices revoked and sessions ended, pending enrollment codes and invitations cancelled, relationships with children of other families revoked (reason `member_removed`) and pending proposals cancelled. The member can no longer communicate or be reached.
-2. **Data is kept as evidence** — relationships, messages, calls and their metadata — for both families during the evidence retention period (see [retention.md](retention.md#evidence-retention)), then purged permanently.
+2. **Data is kept as evidence, without anonymization** (names and history stay as they were, see [evidence.md](evidence.md)) — relationships, messages, calls and their metadata — for both families during the evidence retention period (see [retention.md](retention.md#evidence-retention)), then purged permanently.
 
 A removal that would leave the family without any active parent device is refused, because no family recovery process exists yet.
 

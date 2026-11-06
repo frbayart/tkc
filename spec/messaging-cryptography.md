@@ -79,6 +79,10 @@ If communication plaintext must be provided under a valid legal process, the tec
 
 Actual legal obligations depend on jurisdiction and require specialist legal review.
 
+## Evidence requirements
+
+The protocol must support [evidence.md](evidence.md): each message references the sender's profile version at sending time and is signed by the sending device, so that parents can later verify who sent what, under which name.
+
 ## Cryptographic caution
 
 No custom cryptographic primitive should be invented for this project.

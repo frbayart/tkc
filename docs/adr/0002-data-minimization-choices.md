@@ -16,6 +16,10 @@ The data model (`docs/data-model.md`) had to decide how user profiles and conver
 
 Members of the same family communicate by default without any relationship (spec/identity-family.md). "One conversation per relationship" therefore covers conversations between children of different families only; the messaging design (#11) must also provide family conversations, identified by the family rather than by a relationship.
 
+## Amendment 2 — 2026-11-06
+
+Profiles are not updated in place: every change creates a new immutable, signed, encrypted profile version linked to the previous one, and messages record the sender's profile version, so that evidence shows the name in use at the time (spec/evidence.md). The server still never sees a name.
+
 ## Consequences
 
 - Server-side features cannot search, sort or display names; all name rendering happens on devices.
