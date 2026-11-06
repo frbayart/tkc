@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/frbayart/tkc/server/internal/evidence"
 )
 
 // MaxProfileSize bounds an encrypted profile. Profiles hold small fields
@@ -131,8 +133,11 @@ func (s *Service) CreateProfile(ctx context.Context, p Principal, userID, previo
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE users SET current_profile_id = $2 WHERE id = $1`, userID, pr.ID)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE users SET current_profile_id = $2 WHERE id = $1`, userID, pr.ID); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p), userEvent(userID, "profile_version_created",
+			map[string]any{"profile_id": pr.ID, "version": pr.Version}))
 	})
 	if isUniqueViolation(err) {
 		return Profile{}, fmt.Errorf("%w: concurrent profile change", ErrConflict)
@@ -195,4 +200,25 @@ func CurrentProfiles(ctx context.Context, q Querier, userIDs []string) (map[stri
 		out[profiles[i].UserID] = &profiles[i]
 	}
 	return out, nil
+}
+
+// UserEvents returns a member's event timeline (membership, devices,
+// profile versions) for the parents of the member's family, including after
+// the member was removed.
+func (s *Service) UserEvents(ctx context.Context, p Principal, userID string) (evidence.TimelineView, error) {
+	if err := requireParent(p); err != nil {
+		return evidence.TimelineView{}, err
+	}
+	if !validID(userID) {
+		return evidence.TimelineView{}, ErrNotFound
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND family_id = $2)`,
+		userID, p.FamilyID).Scan(&exists); err != nil {
+		return evidence.TimelineView{}, err
+	}
+	if !exists {
+		return evidence.TimelineView{}, ErrNotFound
+	}
+	return evidence.View(ctx, s.pool, evidence.SubjectUser, userID)
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/frbayart/tkc/server/internal/evidence"
 	"github.com/frbayart/tkc/server/internal/identity"
 	"github.com/frbayart/tkc/server/internal/policy"
 )
@@ -128,14 +129,23 @@ func preparePolicy(pol policy.FamilyPolicy, tz string) (policy.FamilyPolicy, []b
 	return pol, b, err
 }
 
-func upsertPolicy(ctx context.Context, tx pgx.Tx, relID, familyID, userID string, pol []byte, now time.Time) error {
-	_, err := tx.Exec(ctx, `INSERT INTO relationship_policies (relationship_id, family_id, policy, version, updated_by, updated_at)
+// upsertPolicy sets a family's current policy and appends it to the
+// family's immutable policy versions. It returns the new version number.
+func upsertPolicy(ctx context.Context, tx pgx.Tx, relID, familyID, userID string, pol []byte, now time.Time) (int, error) {
+	var version int
+	err := tx.QueryRow(ctx, `INSERT INTO relationship_policies (relationship_id, family_id, policy, version, updated_by, updated_at)
 		VALUES ($1, $2, $3, 1, $4, $5)
 		ON CONFLICT (relationship_id, family_id) DO UPDATE
 		SET policy = EXCLUDED.policy, version = relationship_policies.version + 1,
-		    updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`,
-		relID, familyID, pol, userID, now)
-	return err
+		    updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
+		RETURNING version`, relID, familyID, pol, userID, now).Scan(&version)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO relationship_policy_versions
+		(relationship_id, family_id, version, policy, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		relID, familyID, version, pol, userID, now)
+	return version, err
 }
 
 // insertRel creates a relationship between two children of different
@@ -219,9 +229,13 @@ func (s *Service) RedeemExchangeCode(ctx context.Context, p identity.Principal, 
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE invitations SET consumed_at = $2, consumed_by_family = $3 WHERE id = $1`,
-			invID, now, p.FamilyID)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE invitations SET consumed_at = $2, consumed_by_family = $3 WHERE id = $1`,
+			invID, now, p.FamilyID); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p), relEvent(x.id, "relationship_created", map[string]any{
+			"origin": "in_person", "code_shown_by_child": otherChild, "code_scanned_by_child": p.UserID,
+			"child_a": x.childA, "family_a": x.familyA, "child_b": x.childB, "family_b": x.familyB}))
 	})
 	if err != nil {
 		return Relationship{}, err
@@ -261,7 +275,8 @@ func (s *Service) Approve(ctx context.Context, p identity.Principal, id string, 
 		if err != nil {
 			return err
 		}
-		if err := upsertPolicy(ctx, tx, x.id, p.FamilyID, p.UserID, raw, now); err != nil {
+		version, err := upsertPolicy(ctx, tx, x.id, p.FamilyID, p.UserID, raw, now)
+		if err != nil {
 			return err
 		}
 		col := "approved_a_at"
@@ -274,7 +289,11 @@ func (s *Service) Approve(ctx context.Context, p identity.Principal, id string, 
 		}
 		x, err = scanRel(tx.QueryRow(ctx, `UPDATE relationships SET `+col+` = $2, status = $3, updated_at = $2
 			WHERE id = $1 RETURNING `+relColumns, x.id, now, status))
-		return err
+		if err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p), relEvent(x.id, "relationship_approved",
+			map[string]any{"family_id": p.FamilyID, "policy_version": version, "status": status}))
 	})
 	if err != nil {
 		return Relationship{}, err
@@ -306,18 +325,22 @@ func (s *Service) UpdatePolicy(ctx context.Context, p identity.Principal, id str
 			return err
 		}
 		now := s.Now()
-		if err := upsertPolicy(ctx, tx, x.id, p.FamilyID, p.UserID, raw, now); err != nil {
+		version, err := upsertPolicy(ctx, tx, x.id, p.FamilyID, p.UserID, raw, now)
+		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE relationships SET updated_at = $2 WHERE id = $1`, x.id, now)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE relationships SET updated_at = $2 WHERE id = $1`, x.id, now); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p), relEvent(x.id, "policy_updated",
+			map[string]any{"family_id": p.FamilyID, "policy_version": version}))
 	})
 }
 
 // Suspend temporarily blocks an active relationship. Only the suspending
 // family can resume it.
 func (s *Service) Suspend(ctx context.Context, p identity.Principal, id string) error {
-	return s.transition(ctx, p, id, func(x relRow) (string, []any, error) {
+	return s.transition(ctx, p, id, "relationship_suspended", func(x relRow) (string, []any, error) {
 		if x.status != "active" {
 			return "", nil, fmt.Errorf("%w: relationship is %s", identity.ErrConflict, x.status)
 		}
@@ -327,7 +350,7 @@ func (s *Service) Suspend(ctx context.Context, p identity.Principal, id string) 
 
 // Resume reactivates a relationship suspended by the caller's family.
 func (s *Service) Resume(ctx context.Context, p identity.Principal, id string) error {
-	return s.transition(ctx, p, id, func(x relRow) (string, []any, error) {
+	return s.transition(ctx, p, id, "relationship_resumed", func(x relRow) (string, []any, error) {
 		if x.status != "suspended" || *x.suspendedBy != p.FamilyID {
 			return "", nil, fmt.Errorf("%w: not suspended by this family", identity.ErrConflict)
 		}
@@ -337,7 +360,7 @@ func (s *Service) Resume(ctx context.Context, p identity.Principal, id string) e
 
 // transition applies a parent-initiated status change. f returns the SET
 // clause, which may use $3... for its extra arguments.
-func (s *Service) transition(ctx context.Context, p identity.Principal, id string, f func(relRow) (string, []any, error)) error {
+func (s *Service) transition(ctx context.Context, p identity.Principal, id, eventType string, f func(relRow) (string, []any, error)) error {
 	if err := requireParent(p); err != nil {
 		return err
 	}
@@ -350,9 +373,12 @@ func (s *Service) transition(ctx context.Context, p identity.Principal, id strin
 		if err != nil {
 			return err
 		}
-		args := append([]any{x.id, s.Now()}, extra...)
-		_, err = tx.Exec(ctx, `UPDATE relationships SET `+set+`, updated_at = $2 WHERE id = $1`, args...)
-		return err
+		now := s.Now()
+		args := append([]any{x.id, now}, extra...)
+		if _, err = tx.Exec(ctx, `UPDATE relationships SET `+set+`, updated_at = $2 WHERE id = $1`, args...); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p), relEvent(x.id, eventType, map[string]any{"by_family": p.FamilyID}))
 	})
 }
 
@@ -376,6 +402,10 @@ func (s *Service) Revoke(ctx context.Context, p identity.Principal, id string) e
 			x.id, now, p.FamilyID, reason); err != nil {
 			return err
 		}
+		if err := evidence.Append(ctx, tx, now, actorOf(p), relEvent(x.id, "relationship_revoked",
+			map[string]any{"reason": reason, "by_family": p.FamilyID, "previous_status": x.status})); err != nil {
+			return err
+		}
 		if reason != "child_block" {
 			return nil
 		}
@@ -388,16 +418,28 @@ func (s *Service) Revoke(ctx context.Context, p identity.Principal, id string) e
 // revokeBetween revokes all relationships between two families and cancels
 // pending proposals of their connection. Used when byFamily revokes the
 // family connection.
-func revokeBetween(ctx context.Context, tx pgx.Tx, connectionID, f1, f2, byFamily string, now time.Time) error {
-	if _, err := tx.Exec(ctx, `UPDATE relationships SET status = 'revoked', revoked_at = $3, updated_at = $3,
+func revokeBetween(ctx context.Context, tx pgx.Tx, connectionID, f1, f2, byFamily string, now time.Time) ([]evidence.Entry, error) {
+	rels, err := collectIDs(ctx, tx, `UPDATE relationships SET status = 'revoked', revoked_at = $3, updated_at = $3,
 		suspended_by = NULL, revoked_by_family = $4, revocation_reason = 'connection_revoked'
-		WHERE status <> 'revoked' AND ((family_a = $1 AND family_b = $2) OR (family_a = $2 AND family_b = $1))`,
-		f1, f2, now, byFamily); err != nil {
-		return err
+		WHERE status <> 'revoked' AND ((family_a = $1 AND family_b = $2) OR (family_a = $2 AND family_b = $1))
+		RETURNING id`, f1, f2, now, byFamily)
+	if err != nil {
+		return nil, err
 	}
-	_, err := tx.Exec(ctx, `UPDATE relationship_proposals SET status = 'cancelled', updated_at = $2
-		WHERE connection_id = $1 AND status = 'pending'`, connectionID, now)
-	return err
+	props, err := collectIDs(ctx, tx, `UPDATE relationship_proposals SET status = 'cancelled', updated_at = $2
+		WHERE connection_id = $1 AND status = 'pending' RETURNING id`, connectionID, now)
+	if err != nil {
+		return nil, err
+	}
+	var events []evidence.Entry
+	for _, id := range rels {
+		events = append(events, relEvent(id, "relationship_revoked",
+			map[string]any{"reason": "connection_revoked", "by_family": byFamily, "connection_id": connectionID}))
+	}
+	for _, id := range props {
+		events = append(events, proposalEvent(id, "proposal_cancelled", map[string]any{"reason": "connection_revoked"}))
+	}
+	return events, nil
 }
 
 // List returns the relationships visible to the caller: all of the family's
@@ -601,11 +643,17 @@ func (s *Service) Propose(ctx context.Context, p identity.Principal, connectionI
 		if err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO relationship_proposals
+		if err := tx.QueryRow(ctx, `INSERT INTO relationship_proposals
 			(connection_id, proposer_family, proposer_child, proposer_user, target_family, proposer_policy,
 			 status, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $7) RETURNING id`,
-			connectionID, p.FamilyID, childID, p.UserID, pr.OtherFamilyID, raw, now).Scan(&pr.ID)
+			connectionID, p.FamilyID, childID, p.UserID, pr.OtherFamilyID, raw, now).Scan(&pr.ID); err != nil {
+			return err
+		}
+		// The proposed child is not recorded here: proposal events are visible
+		// to the target family, which must not learn it before accepting.
+		return evidence.Append(ctx, tx, now, actorOf(p), proposalEvent(pr.ID, "proposal_created",
+			map[string]any{"connection_id": connectionID, "proposer_family": p.FamilyID, "target_family": pr.OtherFamilyID}))
 	})
 	if err != nil {
 		return Proposal{}, err
@@ -674,15 +722,26 @@ func (s *Service) AcceptProposal(ctx context.Context, p identity.Principal, prop
 		if err != nil {
 			return err
 		}
-		if err := upsertPolicy(ctx, tx, x.id, p.FamilyID, p.UserID, raw, now); err != nil {
+		ourVersion, err := upsertPolicy(ctx, tx, x.id, p.FamilyID, p.UserID, raw, now)
+		if err != nil {
 			return err
 		}
-		if err := upsertPolicy(ctx, tx, x.id, propFamily, propUser, propPolicy, now); err != nil {
+		theirVersion, err := upsertPolicy(ctx, tx, x.id, propFamily, propUser, propPolicy, now)
+		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE relationship_proposals SET status = 'accepted', relationship_id = $2, updated_at = $3
-			WHERE id = $1`, proposalID, x.id, now)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE relationship_proposals SET status = 'accepted', relationship_id = $2, updated_at = $3
+			WHERE id = $1`, proposalID, x.id, now); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p),
+			proposalEvent(proposalID, "proposal_accepted", map[string]any{"relationship_id": x.id, "by_family": p.FamilyID}),
+			relEvent(x.id, "relationship_created", map[string]any{"origin": "parent", "proposal_id": proposalID,
+				"proposed_by_user": propUser, "child_a": x.childA, "family_a": x.familyA, "child_b": x.childB, "family_b": x.familyB}),
+			relEvent(x.id, "relationship_approved", map[string]any{"family_id": propFamily, "policy_version": theirVersion,
+				"status": "active", "via_proposal": true}),
+			relEvent(x.id, "relationship_approved", map[string]any{"family_id": p.FamilyID, "policy_version": ourVersion,
+				"status": "active"}))
 	})
 	if err != nil {
 		return Relationship{}, err
@@ -698,17 +757,22 @@ func (s *Service) CloseProposal(ctx context.Context, p identity.Principal, propo
 	if !validID(proposalID) {
 		return identity.ErrNotFound
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE relationship_proposals
-		SET status = CASE WHEN target_family = $2 THEN 'declined' ELSE 'cancelled' END, updated_at = $3
-		WHERE id = $1 AND $2 IN (proposer_family, target_family) AND status = 'pending'`,
-		proposalID, p.FamilyID, s.Now())
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return identity.ErrNotFound
-	}
-	return nil
+	now := s.Now()
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var status string
+		err := tx.QueryRow(ctx, `UPDATE relationship_proposals
+			SET status = CASE WHEN target_family = $2 THEN 'declined' ELSE 'cancelled' END, updated_at = $3
+			WHERE id = $1 AND $2 IN (proposer_family, target_family) AND status = 'pending'
+			RETURNING status`, proposalID, p.FamilyID, now).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return identity.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p),
+			proposalEvent(proposalID, "proposal_"+status, map[string]any{"by_family": p.FamilyID}))
+	})
 }
 
 // attachProfiles fills in the children's current profiles.

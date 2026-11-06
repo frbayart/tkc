@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/frbayart/tkc/server/internal/evidence"
 	"github.com/frbayart/tkc/server/internal/identity"
 )
 
@@ -207,10 +208,14 @@ func (s *Service) AcceptInvitation(ctx context.Context, p identity.Principal, co
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE invitations SET consumed_at = $2, consumed_by_family = $3 WHERE id = $1`,
-			invID, now, p.FamilyID)
+		if _, err = tx.Exec(ctx, `UPDATE invitations SET consumed_at = $2, consumed_by_family = $3 WHERE id = $1`,
+			invID, now, p.FamilyID); err != nil {
+			return err
+		}
 		c.OtherFamilyID, c.Status, c.CreatedAt = issuer, "pending", now
-		return err
+		return evidence.Append(ctx, tx, now, actorOf(p), connectionEvent(c.ID, "connection_requested",
+			map[string]any{"issuer_family": issuer, "accepted_by_family": p.FamilyID, "invitation_id": invID,
+				"reconnection": existingID != ""}))
 	})
 	if err != nil {
 		return Connection{}, err
@@ -248,16 +253,19 @@ func (s *Service) ConfirmConnection(ctx context.Context, p identity.Principal, i
 		return identity.ErrNotFound
 	}
 	now := s.Now()
-	tag, err := s.pool.Exec(ctx, `UPDATE family_connections
-		SET status = 'active', confirmed_at = $3, updated_at = $3
-		WHERE id = $1 AND issuer_family = $2 AND status = 'pending'`, id, p.FamilyID, now)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return identity.ErrNotFound
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE family_connections
+			SET status = 'active', confirmed_at = $3, updated_at = $3
+			WHERE id = $1 AND issuer_family = $2 AND status = 'pending'`, id, p.FamilyID, now)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return identity.ErrNotFound
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p),
+			connectionEvent(id, "connection_confirmed", map[string]any{"by_family": p.FamilyID}))
+	})
 }
 
 // RevokeConnection ends a pending or active connection; either family may
@@ -286,6 +294,37 @@ func (s *Service) RevokeConnection(ctx context.Context, p identity.Principal, id
 			SET status = 'revoked', revoked_at = $2, updated_at = $2 WHERE id = $1`, id, now); err != nil {
 			return err
 		}
-		return revokeBetween(ctx, tx, id, famA, famB, p.FamilyID, now)
+		events, err := revokeBetween(ctx, tx, id, famA, famB, p.FamilyID, now)
+		if err != nil {
+			return err
+		}
+		events = append([]evidence.Entry{connectionEvent(id, "connection_revoked",
+			map[string]any{"by_family": p.FamilyID, "previous_status": status})}, events...)
+		return evidence.Append(ctx, tx, now, actorOf(p), events...)
 	})
+}
+
+func actorOf(p identity.Principal) evidence.Actor {
+	return evidence.Actor{UserID: p.UserID, DeviceID: p.DeviceID}
+}
+
+func connectionEvent(id, typ string, data map[string]any) evidence.Entry {
+	return evidence.Entry{SubjectType: evidence.SubjectConnection, SubjectID: id, Type: typ, Data: data}
+}
+
+func relEvent(id, typ string, data map[string]any) evidence.Entry {
+	return evidence.Entry{SubjectType: evidence.SubjectRelationship, SubjectID: id, Type: typ, Data: data}
+}
+
+func proposalEvent(id, typ string, data map[string]any) evidence.Entry {
+	return evidence.Entry{SubjectType: evidence.SubjectProposal, SubjectID: id, Type: typ, Data: data}
+}
+
+// collectIDs runs a statement returning one id column.
+func collectIDs(ctx context.Context, tx pgx.Tx, sql string, args ...any) ([]string, error) {
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }

@@ -176,3 +176,32 @@ func (a *API) setHold(w http.ResponseWriter, r *http.Request) {
 func (a *API) releaseHold(r *http.Request) error {
 	return a.Relationships.ReleaseHold(r.Context(), principal(r), r.PathValue("id"))
 }
+
+func (a *API) relationshipEvents(w http.ResponseWriter, r *http.Request) {
+	v, err := a.Relationships.RelationshipEvents(r.Context(), principal(r), r.PathValue("id"))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (a *API) connectionEvents(w http.ResponseWriter, r *http.Request) {
+	v, err := a.Relationships.ConnectionEvents(r.Context(), principal(r), r.PathValue("id"))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (a *API) policyVersions(w http.ResponseWriter, r *http.Request) {
+	vs, err := a.Relationships.PolicyVersions(r.Context(), principal(r), r.PathValue("id"))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Versions []relationship.PolicyVersion `json:"versions"`
+	}{nonNil(vs)})
+}

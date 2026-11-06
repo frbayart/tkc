@@ -51,6 +51,7 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 - [Family Connections](protocol/family-connections.md)
 - [Child Relationships](protocol/child-relationships.md)
 - [Profiles](protocol/profiles.md)
+- [Evidence Log](protocol/evidence-log.md)
 - [Architecture Decision Records](docs/adr/)
 
 ## Repository layout
