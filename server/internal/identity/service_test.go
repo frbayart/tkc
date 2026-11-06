@@ -384,3 +384,83 @@ func TestRevocation(t *testing.T) {
 	other, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
 	mustErr(t, s.RevokeDevice(ctx, parent2, other.DeviceID), ErrNotFound)
 }
+
+func TestRemoveUser(t *testing.T) {
+	s, _ := newService(t)
+	d1 := newDevice(t)
+	founder, _ := s.CreateFamily(ctx, "UTC", d1.keys)
+	_, parent := login(t, s, founder.DeviceID, d1)
+
+	childID, _ := s.AddUser(ctx, parent, RoleChild, "UTC")
+	cDeviceID, cd := enrollAndApprove(t, s, parent, childID)
+	childToken, child := login(t, s, cDeviceID, cd)
+
+	guardianID, _ := s.AddUser(ctx, parent, RoleParent, "UTC")
+	gDeviceID, gd := enrollAndApprove(t, s, parent, guardianID)
+	_, guardian := login(t, s, gDeviceID, gd)
+
+	// Children cannot remove anyone; other families' members are invisible.
+	mustErr(t, s.RemoveUser(ctx, child, childID), ErrForbidden)
+	other, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
+	mustErr(t, s.RemoveUser(ctx, parent, other.UserID), ErrNotFound)
+	mustErr(t, s.RemoveUser(ctx, other, childID), ErrNotFound)
+
+	// Removing the child kills its sessions and hides it from the family.
+	if err := s.RemoveUser(ctx, parent, childID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Authenticate(ctx, childToken)
+	mustErr(t, err, ErrUnauthenticated)
+	mustErr(t, s.RemoveUser(ctx, parent, childID), ErrNotFound)
+
+	// The founder, whose device approved the guardian's, can be removed while
+	// another parent device remains; the guardian's device stays active.
+	// Removed members are hidden from the family.
+	if err := s.RemoveUser(ctx, guardian, founder.UserID); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.Family(ctx, guardian)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Members) != 1 || f.Members[0].UserID != guardianID || f.Members[0].Devices[0].Status != "active" {
+		t.Fatalf("family after removals %+v", f)
+	}
+	// The removed founder's device can no longer authenticate.
+	nonce, _, _ := s.Challenge(ctx, founder.DeviceID)
+	msg, _ := ChallengeMessage(founder.DeviceID, nonce)
+	_, _, err = s.CreateSession(ctx, founder.DeviceID, nonce, ed25519.Sign(d1.priv, msg))
+	mustErr(t, err, ErrUnauthenticated)
+	// A removed member cannot get new devices.
+	_, _, err = s.CreateEnrollment(ctx, guardian, childID)
+	mustErr(t, err, ErrNotFound)
+
+	// The last parent cannot be removed.
+	mustErr(t, s.RemoveUser(ctx, guardian, guardianID), ErrLastParentDevice)
+}
+
+func TestPurgeRemovedMembers(t *testing.T) {
+	s, c := newService(t)
+	parent, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
+	kid, _ := s.AddUser(ctx, parent, RoleChild, "UTC")
+	kept, _ := s.AddUser(ctx, parent, RoleChild, "UTC")
+	if err := s.RemoveUser(ctx, parent, kid); err != nil {
+		t.Fatal(err)
+	}
+	count := func() (n int) {
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE id IN ($1, $2)`, kid, kept).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// Kept as evidence until the retention period has elapsed.
+	c.advance(DefaultEvidenceRetention - time.Minute)
+	if n, err := s.PurgeRemovedMembers(ctx); err != nil || n != 0 || count() != 2 {
+		t.Fatalf("purged too early: n=%d err=%v", n, err)
+	}
+	c.advance(time.Minute)
+	if n, err := s.PurgeRemovedMembers(ctx); err != nil || n != 1 || count() != 1 {
+		t.Fatalf("purge: n=%d err=%v count=%d", n, err, count())
+	}
+}

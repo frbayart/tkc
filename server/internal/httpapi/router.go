@@ -38,6 +38,7 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("POST /v1/auth/logout", api.authed(api.logout))
 		mux.Handle("GET /v1/family", api.authed(api.family))
 		mux.Handle("POST /v1/users", api.authed(api.addUser))
+		mux.Handle("DELETE /v1/users/{id}", api.authed(api.removeUser))
 		mux.Handle("POST /v1/users/{id}/enrollments", api.authed(api.createEnrollment))
 		mux.Handle("POST /v1/devices/{id}/approve", api.authed(api.approveDevice))
 		mux.Handle("POST /v1/devices/{id}/revoke", api.authed(api.revokeDevice))
@@ -51,6 +52,27 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("GET /v1/family-connections", api.authed(api.listFamilyConnections))
 		mux.Handle("POST /v1/family-connections/{id}/confirm", api.authed(api.confirmFamilyConnection))
 		mux.Handle("POST /v1/family-connections/{id}/revoke", api.authed(api.revokeFamilyConnection))
+		mux.Handle("POST /v1/family-connections/{id}/proposals", api.authed(api.proposeRelationship))
+
+		mux.Handle("GET /v1/relationship-proposals", api.authed(api.listProposals))
+		mux.Handle("POST /v1/relationship-proposals/{id}/accept", api.authed(api.acceptProposal))
+		mux.Handle("POST /v1/relationship-proposals/{id}/close", api.authed(api.noContent(api.closeProposal)))
+
+		mux.Handle("POST /v1/exchange-codes", api.authed(api.createExchangeCode))
+		mux.Handle("POST /v1/exchange-codes/redeem", api.authed(api.redeemExchangeCode))
+
+		mux.Handle("GET /v1/relationships", api.authed(api.listRelationships))
+		mux.Handle("GET /v1/relationships/{id}", api.authed(api.getRelationship))
+		mux.Handle("POST /v1/relationships/{id}/approve", api.authed(api.approveRelationship))
+		mux.Handle("PUT /v1/relationships/{id}/policy", api.authed(api.updateRelationshipPolicy))
+		mux.Handle("POST /v1/relationships/{id}/suspend", api.authed(api.noContent(api.suspendRelationship)))
+		mux.Handle("POST /v1/relationships/{id}/resume", api.authed(api.noContent(api.resumeRelationship)))
+		mux.Handle("POST /v1/relationships/{id}/revoke", api.authed(api.noContent(api.revokeRelationship)))
+		mux.Handle("POST /v1/relationships/{id}/hold", api.authed(api.setHold))
+		mux.Handle("DELETE /v1/relationships/{id}/hold", api.authed(api.noContent(api.releaseHold)))
+
+		mux.Handle("GET /v1/notifications", api.authed(api.listNotifications))
+		mux.Handle("POST /v1/notifications/{id}/read", api.authed(api.noContent(api.markNotificationRead)))
 	}
 	return mux
 }

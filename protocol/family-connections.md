@@ -53,6 +53,7 @@ stateDiagram-v2
     revoked --> pending: new invitation accepted
 ```
 
+- Revoking a connection **revokes all relationships between the children of the two families** and cancels pending proposals (see [child-relationships.md](child-relationships.md)).
 - There is at most one connection per pair of families. Reconnecting after a revocation reuses it and requires a new invitation and a new confirmation; the new issuer may be either family.
 - Only parents can manage connections. Children cannot see them.
 
@@ -70,5 +71,4 @@ stateDiagram-v2
 
 ## Open questions
 
-- **Effect of revoking a family connection on existing child relationships.** Not decided yet; it will be specified with child relationships (#9). Options: revoke all relationships between the two families, or only those created through the parent path.
 - **Identifying the other family.** Families have no name on the server (ADR 0002). Clients will need an end-to-end encrypted way to show parent B who accepted; until then, the out-of-band channel is the only confirmation.

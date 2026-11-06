@@ -94,6 +94,8 @@ In the database (`docs/data-model.md`), `pending_family_a` and `pending_family_b
 
 ## Revocation
 
+The implemented protocol, including both establishment paths and the effect of revoking a family connection, is specified in [protocol/child-relationships.md](../protocol/child-relationships.md).
+
 A relationship can be blocked or revoked.
 
 Revocation must prevent future communication immediately at the authorization layer.

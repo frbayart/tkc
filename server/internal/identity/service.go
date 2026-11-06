@@ -80,6 +80,8 @@ type Service struct {
 	SessionTTL    time.Duration
 	ChallengeTTL  time.Duration
 	EnrollmentTTL time.Duration
+	// EvidenceRetention is how long a removed member's data is kept.
+	EvidenceRetention time.Duration
 }
 
 // New returns a service with default settings.
@@ -90,6 +92,8 @@ func New(pool *pgxpool.Pool) *Service {
 		SessionTTL:    DefaultSessionTTL,
 		ChallengeTTL:  DefaultChallengeTTL,
 		EnrollmentTTL: DefaultEnrollmentTTL,
+
+		EvidenceRetention: DefaultEvidenceRetention,
 	}
 }
 
@@ -305,6 +309,104 @@ func (s *Service) RevokeDevice(ctx context.Context, p Principal, deviceID string
 	})
 }
 
+// RemoveUser retires a member of the caller's family. Within a family,
+// members can always communicate; removing the account is how a member stops
+// being visible and reachable. Only parents can remove members, and a removal
+// that would leave the family without an active parent device is refused.
+//
+// The effect is immediate: the member disappears from the family, its
+// devices are revoked, its sessions end, and its relationships with other
+// families are revoked. Its data (relationships, messages, calls) is kept as
+// evidence for both families until EvidenceRetention has elapsed, and is then
+// deleted by PurgeRemovedMembers.
+func (s *Service) RemoveUser(ctx context.Context, p Principal, userID string) error {
+	if err := requireParent(p); err != nil {
+		return err
+	}
+	if !validID(userID) {
+		return ErrNotFound
+	}
+	now := s.Now()
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Serialize with revocations and other removals in the family.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM families WHERE id = $1 FOR UPDATE`, p.FamilyID); err != nil {
+			return err
+		}
+		var role Role
+		err := tx.QueryRow(ctx, `SELECT role FROM users WHERE id = $1 AND family_id = $2 AND status <> 'removed'`,
+			userID, p.FamilyID).Scan(&role)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if role == RoleParent {
+			var others int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM devices d JOIN users u ON u.id = d.user_id
+				WHERE u.family_id = $1 AND u.role = 'parent' AND u.status = 'active'
+				AND d.status = 'active' AND u.id <> $2`, p.FamilyID, userID).Scan(&others); err != nil {
+				return err
+			}
+			if others == 0 {
+				return ErrLastParentDevice
+			}
+		}
+		steps := []struct {
+			sql  string
+			args []any
+		}{
+			{`UPDATE users SET status = 'removed', removed_at = $2, purge_after = $3 WHERE id = $1`,
+				[]any{userID, now, now.Add(s.evidenceRetention())}},
+			{`DELETE FROM sessions WHERE device_id IN (SELECT id FROM devices WHERE user_id = $1)`, []any{userID}},
+			{`UPDATE devices SET status = 'revoked', revoked_at = $2 WHERE user_id = $1 AND status <> 'revoked'`,
+				[]any{userID, now}},
+			{`DELETE FROM device_enrollments WHERE target_user_id = $1 AND consumed_at IS NULL`, []any{userID}},
+			{`UPDATE invitations SET revoked_at = $2
+				WHERE (issuer_user_id = $1 OR child_id = $1) AND consumed_at IS NULL AND revoked_at IS NULL`,
+				[]any{userID, now}},
+			{`UPDATE relationships SET status = 'revoked', revoked_at = $2, updated_at = $2, suspended_by = NULL,
+				revoked_by_family = $3, revocation_reason = 'member_removed'
+				WHERE $1 IN (child_a, child_b) AND status <> 'revoked'`, []any{userID, now, p.FamilyID}},
+			{`UPDATE relationship_proposals SET status = 'cancelled', updated_at = $2
+				WHERE (proposer_child = $1 OR proposer_user = $1) AND status = 'pending'`, []any{userID, now}},
+		}
+		for _, st := range steps {
+			if _, err := tx.Exec(ctx, st.sql, st.args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// DefaultEvidenceRetention is how long a removed member's data is kept as
+// evidence before being purged. Provisional value pending legal review.
+const DefaultEvidenceRetention = 365 * 24 * time.Hour
+
+func (s *Service) evidenceRetention() time.Duration {
+	if s.EvidenceRetention > 0 {
+		return s.EvidenceRetention
+	}
+	return DefaultEvidenceRetention
+}
+
+// PurgeRemovedMembers permanently deletes removed members whose evidence
+// retention period has elapsed, with everything attached to them, unless a
+// preservation hold is active on one of their relationships. It returns
+// the number of members purged. It is meant to run periodically.
+func (s *Service) PurgeRemovedMembers(ctx context.Context) (int64, error) {
+	// Members involved in a relationship under an active preservation hold
+	// are kept until the hold is released or expires.
+	tag, err := s.pool.Exec(ctx, `DELETE FROM users u WHERE u.status = 'removed' AND u.purge_after <= $1
+		AND NOT EXISTS (SELECT 1 FROM preservation_holds h JOIN relationships r ON r.id = h.relationship_id
+			WHERE h.released_at IS NULL AND h.expires_at > $1 AND u.id IN (r.child_a, r.child_b))`, s.Now())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // Challenge returns a single-use nonce for deviceID to sign. To avoid
 // revealing which devices exist, a nonce is returned for any well-formed ID;
 // it is only stored, and thus usable, for active devices.
@@ -435,7 +537,7 @@ type Family struct {
 func (s *Service) Family(ctx context.Context, p Principal) (Family, error) {
 	f := Family{ID: p.FamilyID, Members: []Member{}}
 	rows, err := s.pool.Query(ctx, `SELECT id, role, time_zone, status, profile_ciphertext
-		FROM users WHERE family_id = $1 ORDER BY created_at, id`, p.FamilyID)
+		FROM users WHERE family_id = $1 AND status <> 'removed' ORDER BY created_at, id`, p.FamilyID)
 	if err != nil {
 		return Family{}, err
 	}
@@ -453,7 +555,7 @@ func (s *Service) Family(ctx context.Context, p Principal) (Family, error) {
 	rows, err = s.pool.Query(ctx, `SELECT d.user_id, d.id, d.device_type, d.platform, d.identity_public_key,
 		d.encryption_public_key, d.key_version, d.status, d.approved_by_device_id, d.registered_at, d.revoked_at
 		FROM devices d JOIN users u ON u.id = d.user_id
-		WHERE u.family_id = $1 ORDER BY d.registered_at, d.id`, p.FamilyID)
+		WHERE u.family_id = $1 AND u.status <> 'removed' ORDER BY d.registered_at, d.id`, p.FamilyID)
 	if err != nil {
 		return Family{}, err
 	}

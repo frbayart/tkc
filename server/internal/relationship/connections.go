@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/frbayart/tkc/server/internal/identity"
@@ -29,11 +30,18 @@ type Service struct {
 	pool          *pgxpool.Pool
 	Now           func() time.Time
 	InvitationTTL time.Duration
+	ExchangeTTL   time.Duration
+	HoldDuration  time.Duration
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // New returns a service with default settings.
 func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, Now: time.Now, InvitationTTL: DefaultInvitationTTL}
+	return &Service{pool: pool, Now: time.Now, InvitationTTL: DefaultInvitationTTL, ExchangeTTL: DefaultExchangeTTL, HoldDuration: DefaultHoldDuration}
 }
 
 func requireParent(p identity.Principal) error {
@@ -253,7 +261,9 @@ func (s *Service) ConfirmConnection(ctx context.Context, p identity.Principal, i
 }
 
 // RevokeConnection ends a pending or active connection; either family may
-// do it at any time. Declining a pending connection is a revocation.
+// do it at any time. Declining a pending connection is a revocation. All
+// relationships between the children of the two families are revoked and
+// pending proposals are cancelled. Revoking again is a no-op.
 func (s *Service) RevokeConnection(ctx context.Context, p identity.Principal, id string) error {
 	if err := requireParent(p); err != nil {
 		return err
@@ -262,21 +272,20 @@ func (s *Service) RevokeConnection(ctx context.Context, p identity.Principal, id
 		return identity.ErrNotFound
 	}
 	now := s.Now()
-	tag, err := s.pool.Exec(ctx, `UPDATE family_connections
-		SET status = 'revoked', revoked_at = $3, updated_at = $3
-		WHERE id = $1 AND $2 IN (family_a, family_b) AND status <> 'revoked'`, id, p.FamilyID, now)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		var exists bool
-		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM family_connections
-			WHERE id = $1 AND $2 IN (family_a, family_b))`, id, p.FamilyID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var famA, famB, status string
+		err := tx.QueryRow(ctx, `SELECT family_a, family_b, status FROM family_connections
+			WHERE id = $1 AND $2 IN (family_a, family_b) FOR UPDATE`, id, p.FamilyID).Scan(&famA, &famB, &status)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return identity.ErrNotFound
 		}
-	}
-	return nil
+		if err != nil || status == "revoked" {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE family_connections
+			SET status = 'revoked', revoked_at = $2, updated_at = $2 WHERE id = $1`, id, now); err != nil {
+			return err
+		}
+		return revokeBetween(ctx, tx, id, famA, famB, p.FamilyID, now)
+	})
 }

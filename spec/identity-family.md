@@ -65,6 +65,27 @@ Child devices receive only the keys and capabilities necessary for the child's a
 
 A lost or replaced device must be revocable.
 
+## Communication within a family
+
+Members of the same family — parents, guardians and children — can always communicate with each other. This needs no relationship, approval or policy: being in the family is the trust path.
+
+Consequences:
+
+- children of the same family are never linked through a child relationship;
+- **a child cannot block their own family**: blocking applies only to relationships with children of other families;
+- to stop a member from being visible and reachable within the family, a parent **removes the member's account** (see below).
+
+## Removing a member
+
+A parent can remove any member of their family, including another guardian or themselves (`DELETE /v1/users/{id}`). Removal happens in two stages:
+
+1. **Immediately**, the member is retired: hidden from the family, all devices revoked and sessions ended, pending enrollment codes and invitations cancelled, relationships with children of other families revoked (reason `member_removed`) and pending proposals cancelled. The member can no longer communicate or be reached.
+2. **Data is kept as evidence, without anonymization** (names and history stay as they were, see [evidence.md](evidence.md)) — relationships, messages, calls and their metadata — for both families during the evidence retention period (see [retention.md](retention.md#evidence-retention)), then purged permanently.
+
+A removal that would leave the family without any active parent device is refused, because no family recovery process exists yet.
+
+Cryptographic consequence: once end-to-end encryption is designed, removing a member must rotate the keys of the family's conversations so that the removed member's devices cannot read future content.
+
 ## Family changes
 
 The model must eventually cover:

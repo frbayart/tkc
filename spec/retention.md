@@ -75,6 +75,31 @@ Parents should be able to understand:
 - why a recording is retained;
 - whether only metadata will remain afterward.
 
+## Evidence retention
+
+Communication involving minors may later be needed as **evidence**: legal proceedings, harassment, or psychological follow-up. Evidence matters to **both families** of a relationship, not only to the family that ends it.
+
+How evidence is structured — no anonymization, versioned profiles, append-only event log — is specified in [evidence.md](evidence.md).
+
+Rules implemented so far:
+
+- **Ending a relationship never deletes it.** Revoking, blocking, or revoking the family connection keeps the relationship, its history and its (encrypted) messages; both families' parents can still see it, with who revoked it and why.
+- **Removing a member does not delete data immediately.** The account is retired at once, but its data is kept until `purge_after = removed_at + evidence retention period`, then permanently deleted with everything attached to it. A background job runs the purge every hour.
+- The evidence retention period is configurable (`tkc-server -evidence-retention`, default **365 days**). **This default is provisional and requires legal review**, possibly per jurisdiction.
+
+The provider only keeps ciphertext: evidence is readable only by the parents' devices that hold the keys, which is consistent with the legal-access model in [messaging-cryptography.md](messaging-cryptography.md).
+
+Open points:
+
+- **Preservation hold.** A parent of either family can place a hold on a relationship, including an ended one, while a concern is being investigated. While a hold is active:
+  - **no call recording of the relationship is deleted**, whatever the recording policy (reason `preservation_hold`, see `retention.ComputeWithHold`);
+  - the **purge of a removed member** involved in the relationship is deferred.
+
+  Each family manages its own hold and only it can release it. **The other family is never informed**: each family's privacy matters, and a family that places a hold because of a doubt must not have to alert the other one. In a real dispute, lawyers decide. A hold lasts **365 days by default and can be renewed**, so that none lasts forever by oversight (provisional value, pending legal review). When it ends, normal retention applies again.
+- **Message retention.** Messages are kept as long as their relationship exists (and therefore during the evidence retention period of a removed member). A technical maximum is likely to be introduced later; it must not apply while a preservation hold is active.
+- **Deletion requests do not shorten evidence retention.** A family can delete its data from its own view and devices (and remove a member), but this never purges evidence earlier. **Even if both families agree**, evidence is kept until the end of the evidence retention period, to protect the child from the families' decisions. No API allows an early purge; only the scheduled purge deletes evidence, at the end of the period.
+- How this interacts with statutory erasure rights or a court order still needs legal review, possibly per jurisdiction.
+
 ## Open questions
 
 Final retention defaults require both product and legal review, particularly because the retained content concerns minors and may contain highly private domestic audio/video.
