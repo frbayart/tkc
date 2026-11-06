@@ -23,6 +23,8 @@ erDiagram
     users |o--o{ invitations : "child (in-person exchange)"
     users ||--o{ relationships : "child_a / child_b"
     relationships ||--|{ relationship_policies : "one per family"
+    families ||--o{ family_notifications : receives
+    relationships |o--o{ family_notifications : about
     families ||--o{ relationship_policies : defines
     relationships ||--o{ messages : carries
     devices ||--o{ messages : sends
@@ -79,6 +81,7 @@ erDiagram
         text status "proposed | pending | active | suspended | revoked"
         text origin "in_person | parent"
         uuid suspended_by FK "only it can resume"
+        text revocation_reason "parent | child_block | connection_revoked"
         timestamptz approved_a_at
         timestamptz approved_b_at
     }
@@ -89,6 +92,13 @@ erDiagram
         uuid target_family FK
         jsonb proposer_policy
         text status "pending | accepted | declined | cancelled"
+    }
+    family_notifications {
+        uuid id PK
+        uuid family_id FK
+        text kind "relationship_blocked_by_child"
+        uuid relationship_id FK
+        timestamptz read_at
     }
     relationship_policies {
         uuid relationship_id PK
@@ -128,7 +138,7 @@ erDiagram
 | `devices` | `revoked` ⇔ `revoked_at` set; identity keys are unique |
 | `family_connections` | one row per pair of families, canonical order `family_a < family_b`; the issuer is one of the pair; `active` requires `confirmed_at`; `revoked` ⇔ `revoked_at` |
 | `invitations` | only the token hash is stored; `child_exchange` ⇔ a child **of the issuer family**; cannot be both consumed and revoked; finite expiry |
-| `relationships` | each child belongs to the stated family; canonical order `child_a < child_b`; `active`/`suspended` require both parental approvals, `pending` exactly one, `proposed` none; children of different families; `suspended` ⇔ `suspended_by` set; at most one non-revoked relationship per pair |
+| `relationships` | each child belongs to the stated family; canonical order `child_a < child_b`; `active`/`suspended` require both parental approvals, `pending` exactly one, `proposed` none; children of different families; `suspended` ⇔ `suspended_by` set; `revoked` ⇔ a revocation reason; at most one non-revoked relationship per pair |
 | `relationship_proposals` | the proposed child belongs to the proposing family; proposer and target families differ; `accepted` requires the created relationship |
 | `calls` | `authorized_until` (from the policy engine) is after the start; `ended_at` ⇔ `termination_reason` |
 | `recordings` | one per call; `deleted_at` ⇔ `deletion_reason` |

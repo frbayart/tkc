@@ -305,6 +305,48 @@ func (s *Service) RevokeDevice(ctx context.Context, p Principal, deviceID string
 	})
 }
 
+// RemoveUser deletes a member of the caller's family: the account, its
+// devices and sessions, and everything attached to it (relationships with
+// other families, their messages and calls). Within a family, members can
+// always communicate; removing the account is how a member stops being
+// visible and reachable. Only parents can remove members, and a removal that
+// would leave the family without an active parent device is refused.
+func (s *Service) RemoveUser(ctx context.Context, p Principal, userID string) error {
+	if err := requireParent(p); err != nil {
+		return err
+	}
+	if !validID(userID) {
+		return ErrNotFound
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Serialize with revocations and other removals in the family.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM families WHERE id = $1 FOR UPDATE`, p.FamilyID); err != nil {
+			return err
+		}
+		var role Role
+		err := tx.QueryRow(ctx, `SELECT role FROM users WHERE id = $1 AND family_id = $2`, userID, p.FamilyID).Scan(&role)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if role == RoleParent {
+			var others int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM devices d JOIN users u ON u.id = d.user_id
+				WHERE u.family_id = $1 AND u.role = 'parent' AND u.status = 'active'
+				AND d.status = 'active' AND u.id <> $2`, p.FamilyID, userID).Scan(&others); err != nil {
+				return err
+			}
+			if others == 0 {
+				return ErrLastParentDevice
+			}
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		return err
+	})
+}
+
 // Challenge returns a single-use nonce for deviceID to sign. To avoid
 // revealing which devices exist, a nonce is returned for any well-formed ID;
 // it is only stored, and thus usable, for active devices.

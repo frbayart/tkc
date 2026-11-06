@@ -8,7 +8,7 @@ Draft — v0.1 — implemented in `server/internal/relationship`
 - A child-to-child relationship exists only through an **explicit trust path**: an in-person exchange approved by both families, or a parent proposal between two connected families.
 - **No child is discoverable.** The server never discloses a child's ID to another family before both families agree to a relationship.
 - **Each family sets its own policy** for the relationship when approving it. The effective policy is the intersection of the two (see [spec/relationship-policies.md](../spec/relationship-policies.md)). A family's raw policy is shown only to its own parents; the other side sees only the effective result.
-- Children of the same family are not linked through relationships.
+- Members of the same family communicate by default without any relationship (see [spec/identity-family.md](../spec/identity-family.md)), so children of the same family are never linked through a relationship, and **a child cannot block their own family**.
 
 ## Path 1 — In-person exchange
 
@@ -81,8 +81,10 @@ stateDiagram-v2
 | Update policy | A parent of a family that already approved; applies immediately |
 | Suspend | A parent of either family (active only) |
 | Resume | A parent of the family that suspended it |
-| Revoke / decline | A parent of either family, or **a child of the relationship (block)** |
+| Revoke / decline | A parent of either family, or **a child of the relationship (block)**, whose parents are then notified |
 
+- **A child can block a relationship alone**, without waiting for their parents. The block takes effect immediately, and the child's parents receive a `relationship_blocked_by_child` notification so they can talk about it with the child. The other family sees that the relationship was blocked by the other child, but is not notified.
+- Every revoked relationship records which family revoked it and why: `parent`, `child_block` or `connection_revoked`.
 - Revocation is immediate and final: a revoked relationship never becomes active again. The children can start a new exchange later, which requires new approvals.
 - **Revoking a family connection revokes every relationship between the children of the two families** (whatever their origin) and cancels pending proposals. Reconnecting does not restore them.
 - Only `active` relationships allow communication. Messaging and signaling obtain the effective policy from `relationship.Service.Effective`, which fails for any other status or if a policy is missing.
@@ -106,6 +108,8 @@ stateDiagram-v2
 | `POST /v1/relationships/{id}/suspend` | parent | Suspend |
 | `POST /v1/relationships/{id}/resume` | parent | Resume (suspending family) |
 | `POST /v1/relationships/{id}/revoke` | parent or child participant | Revoke, decline or block |
+| `GET /v1/notifications` | parent | Family notifications, newest first (at most 100) |
+| `POST /v1/notifications/{id}/read` | parent | Mark a notification as read for all parents of the family |
 | `POST /v1/family-connections/{id}/proposals` | parent | Propose `{child_id, policy}` |
 | `GET /v1/relationship-proposals` | parent | Pending proposals, incoming and outgoing |
 | `POST /v1/relationship-proposals/{id}/accept` | parent (target) | Accept `{child_id, policy}` |

@@ -384,3 +384,49 @@ func TestRevocation(t *testing.T) {
 	other, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
 	mustErr(t, s.RevokeDevice(ctx, parent2, other.DeviceID), ErrNotFound)
 }
+
+func TestRemoveUser(t *testing.T) {
+	s, _ := newService(t)
+	d1 := newDevice(t)
+	founder, _ := s.CreateFamily(ctx, "UTC", d1.keys)
+	_, parent := login(t, s, founder.DeviceID, d1)
+
+	childID, _ := s.AddUser(ctx, parent, RoleChild, "UTC")
+	cDeviceID, cd := enrollAndApprove(t, s, parent, childID)
+	childToken, child := login(t, s, cDeviceID, cd)
+
+	guardianID, _ := s.AddUser(ctx, parent, RoleParent, "UTC")
+	gDeviceID, gd := enrollAndApprove(t, s, parent, guardianID)
+	_, guardian := login(t, s, gDeviceID, gd)
+
+	// Children cannot remove anyone; other families' members are invisible.
+	mustErr(t, s.RemoveUser(ctx, child, childID), ErrForbidden)
+	other, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
+	mustErr(t, s.RemoveUser(ctx, parent, other.UserID), ErrNotFound)
+	mustErr(t, s.RemoveUser(ctx, other, childID), ErrNotFound)
+
+	// Removing the child kills its sessions and hides it from the family.
+	if err := s.RemoveUser(ctx, parent, childID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Authenticate(ctx, childToken)
+	mustErr(t, err, ErrUnauthenticated)
+	mustErr(t, s.RemoveUser(ctx, parent, childID), ErrNotFound)
+
+	// The founder, whose device approved the guardian's, can be removed while
+	// another parent device remains; the guardian's device stays active.
+	if err := s.RemoveUser(ctx, guardian, founder.UserID); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.Family(ctx, guardian)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Members) != 1 || f.Members[0].UserID != guardianID ||
+		f.Members[0].Devices[0].Status != "active" || f.Members[0].Devices[0].ApprovedByDeviceID != nil {
+		t.Fatalf("family after removals %+v", f)
+	}
+
+	// The last parent cannot be removed.
+	mustErr(t, s.RemoveUser(ctx, guardian, guardianID), ErrLastParentDevice)
+}

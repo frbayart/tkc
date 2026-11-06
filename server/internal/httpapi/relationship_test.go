@@ -142,3 +142,36 @@ func TestProposalsHTTP(t *testing.T) {
 	c.expect(204, "POST", "/v1/relationship-proposals/"+pr.ID+"/close", parentB, nil, nil)
 	c.expect(404, "POST", "/v1/relationship-proposals/"+pr.ID+"/close", parentA, nil, nil)
 }
+
+func TestRemoveMemberHTTP(t *testing.T) {
+	c := newClient(t)
+	parent, _ := c.newParent()
+	kid, kidToken := c.newChild(parent)
+	c.expect(403, "DELETE", "/v1/users/"+kid, kidToken, nil, nil)
+	c.expect(204, "DELETE", "/v1/users/"+kid, parent, nil, nil)
+	c.expect(401, "GET", "/v1/family", kidToken, nil, nil)
+	c.expect(404, "DELETE", "/v1/users/"+kid, parent, nil, nil)
+}
+
+func TestChildBlockNotificationHTTP(t *testing.T) {
+	c := newClient(t)
+	parentA, _ := c.newParent()
+	parentB, _ := c.newParent()
+	_, tokenKidA := c.newChild(parentA)
+	_, tokenKidB := c.newChild(parentB)
+
+	var ec relationship.ExchangeCode
+	c.expect(201, "POST", "/v1/exchange-codes", tokenKidA, nil, &ec)
+	var rel relationship.Relationship
+	c.expect(201, "POST", "/v1/exchange-codes/redeem", tokenKidB, map[string]string{"code": ec.Code}, &rel)
+	c.expect(204, "POST", "/v1/relationships/"+rel.ID+"/revoke", tokenKidB, nil, nil)
+
+	c.expect(403, "GET", "/v1/notifications", tokenKidB, nil, nil)
+	var ns struct{ Notifications []relationship.Notification }
+	c.expect(200, "GET", "/v1/notifications", parentB, nil, &ns)
+	if len(ns.Notifications) != 1 || ns.Notifications[0].Kind != "relationship_blocked_by_child" {
+		t.Fatalf("notifications %+v", ns)
+	}
+	c.expect(404, "POST", "/v1/notifications/"+ns.Notifications[0].ID+"/read", parentA, nil, nil)
+	c.expect(204, "POST", "/v1/notifications/"+ns.Notifications[0].ID+"/read", parentB, nil, nil)
+}

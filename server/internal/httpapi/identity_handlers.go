@@ -169,3 +169,11 @@ func (a *API) revokeDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (a *API) removeUser(w http.ResponseWriter, r *http.Request) {
+	if err := a.Identity.RemoveUser(r.Context(), principal(r), r.PathValue("id")); err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

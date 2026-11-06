@@ -19,34 +19,38 @@ const DefaultExchangeTTL = 5 * time.Minute
 
 // Relationship is a child relationship as seen by one of its families.
 type Relationship struct {
-	ID             string    `json:"id"`
-	OurChildID     string    `json:"our_child_id"`
-	OtherChildID   string    `json:"other_child_id"`
-	OtherFamilyID  string    `json:"other_family_id"`
-	Status         string    `json:"status"`
-	Origin         string    `json:"origin"`
-	ApprovedByUs   bool      `json:"approved_by_us"`
-	ApprovedByThem bool      `json:"approved_by_them"`
-	SuspendedByUs  bool      `json:"suspended_by_us"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OurChildID     string `json:"our_child_id"`
+	OtherChildID   string `json:"other_child_id"`
+	OtherFamilyID  string `json:"other_family_id"`
+	Status         string `json:"status"`
+	Origin         string `json:"origin"`
+	ApprovedByUs   bool   `json:"approved_by_us"`
+	ApprovedByThem bool   `json:"approved_by_them"`
+	SuspendedByUs  bool   `json:"suspended_by_us"`
+	// RevocationReason is "parent", "child_block" or "connection_revoked"
+	// for revoked relationships.
+	RevocationReason string    `json:"revocation_reason,omitempty"`
+	RevokedByUs      bool      `json:"revoked_by_us"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // relRow is a relationships row.
 type relRow struct {
 	id, childA, familyA, childB, familyB, status, origin string
 	approvedA, approvedB                                 *time.Time
-	suspendedBy                                          *string
+	suspendedBy, revokedBy, revocationReason             *string
 	createdAt, updatedAt                                 time.Time
 }
 
 const relColumns = `id, child_a, family_a, child_b, family_b, status, origin,
-	approved_a_at, approved_b_at, suspended_by, created_at, updated_at`
+	approved_a_at, approved_b_at, suspended_by, revoked_by_family, revocation_reason, created_at, updated_at`
 
 func scanRel(r pgx.Row) (relRow, error) {
 	var x relRow
 	err := r.Scan(&x.id, &x.childA, &x.familyA, &x.childB, &x.familyB, &x.status, &x.origin,
-		&x.approvedA, &x.approvedB, &x.suspendedBy, &x.createdAt, &x.updatedAt)
+		&x.approvedA, &x.approvedB, &x.suspendedBy, &x.revokedBy, &x.revocationReason, &x.createdAt, &x.updatedAt)
 	return x, err
 }
 
@@ -62,7 +66,11 @@ func (x relRow) view(familyID string) Relationship {
 	r := Relationship{
 		ID: x.id, Status: x.status, Origin: x.origin,
 		SuspendedByUs: x.suspendedBy != nil && *x.suspendedBy == familyID,
+		RevokedByUs:   x.revokedBy != nil && *x.revokedBy == familyID,
 		CreatedAt:     x.createdAt, UpdatedAt: x.updatedAt,
+	}
+	if x.revocationReason != nil {
+		r.RevocationReason = *x.revocationReason
 	}
 	if x.side(familyID) == policy.SideA {
 		r.OurChildID, r.OtherChildID, r.OtherFamilyID = x.childA, x.childB, x.familyB
@@ -346,8 +354,9 @@ func (s *Service) transition(ctx context.Context, p identity.Principal, id strin
 }
 
 // Revoke ends a relationship immediately. Parents of either family can
-// revoke (or decline) it; a child can revoke (block) their own relationship.
-// Revoking is idempotent.
+// revoke (or decline) it. A child can revoke (block) their own relationship
+// alone; their parents are then notified so they can talk about it with the
+// child. Revoking is idempotent.
 func (s *Service) Revoke(ctx context.Context, p identity.Principal, id string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		x, err := loadRel(ctx, tx, p, id)
@@ -355,20 +364,32 @@ func (s *Service) Revoke(ctx context.Context, p identity.Principal, id string) e
 			return err
 		}
 		now := s.Now()
-		_, err = tx.Exec(ctx, `UPDATE relationships SET status = 'revoked', revoked_at = $2, updated_at = $2,
-			suspended_by = NULL WHERE id = $1`, x.id, now)
+		reason := "parent"
+		if p.Role != identity.RoleParent {
+			reason = "child_block"
+		}
+		if _, err = tx.Exec(ctx, `UPDATE relationships SET status = 'revoked', revoked_at = $2, updated_at = $2,
+			suspended_by = NULL, revoked_by_family = $3, revocation_reason = $4 WHERE id = $1`,
+			x.id, now, p.FamilyID, reason); err != nil {
+			return err
+		}
+		if reason != "child_block" {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO family_notifications (family_id, kind, relationship_id, child_id, created_at)
+			VALUES ($1, 'relationship_blocked_by_child', $2, $3, $4)`, p.FamilyID, x.id, p.UserID, now)
 		return err
 	})
 }
 
 // revokeBetween revokes all relationships between two families and cancels
-// pending proposals of their connection. Used when the family connection is
-// revoked.
-func revokeBetween(ctx context.Context, tx pgx.Tx, connectionID, f1, f2 string, now time.Time) error {
+// pending proposals of their connection. Used when byFamily revokes the
+// family connection.
+func revokeBetween(ctx context.Context, tx pgx.Tx, connectionID, f1, f2, byFamily string, now time.Time) error {
 	if _, err := tx.Exec(ctx, `UPDATE relationships SET status = 'revoked', revoked_at = $3, updated_at = $3,
-		suspended_by = NULL
+		suspended_by = NULL, revoked_by_family = $4, revocation_reason = 'connection_revoked'
 		WHERE status <> 'revoked' AND ((family_a = $1 AND family_b = $2) OR (family_a = $2 AND family_b = $1))`,
-		f1, f2, now); err != nil {
+		f1, f2, now, byFamily); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE relationship_proposals SET status = 'cancelled', updated_at = $2

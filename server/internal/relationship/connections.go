@@ -285,6 +285,6 @@ func (s *Service) RevokeConnection(ctx context.Context, p identity.Principal, id
 			SET status = 'revoked', revoked_at = $2, updated_at = $2 WHERE id = $1`, id, now); err != nil {
 			return err
 		}
-		return revokeBetween(ctx, tx, id, famA, famB, now)
+		return revokeBetween(ctx, tx, id, famA, famB, p.FamilyID, now)
 	})
 }

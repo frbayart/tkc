@@ -38,6 +38,7 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("POST /v1/auth/logout", api.authed(api.logout))
 		mux.Handle("GET /v1/family", api.authed(api.family))
 		mux.Handle("POST /v1/users", api.authed(api.addUser))
+		mux.Handle("DELETE /v1/users/{id}", api.authed(api.removeUser))
 		mux.Handle("POST /v1/users/{id}/enrollments", api.authed(api.createEnrollment))
 		mux.Handle("POST /v1/devices/{id}/approve", api.authed(api.approveDevice))
 		mux.Handle("POST /v1/devices/{id}/revoke", api.authed(api.revokeDevice))
@@ -67,6 +68,9 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("POST /v1/relationships/{id}/suspend", api.authed(api.noContent(api.suspendRelationship)))
 		mux.Handle("POST /v1/relationships/{id}/resume", api.authed(api.noContent(api.resumeRelationship)))
 		mux.Handle("POST /v1/relationships/{id}/revoke", api.authed(api.noContent(api.revokeRelationship)))
+
+		mux.Handle("GET /v1/notifications", api.authed(api.listNotifications))
+		mux.Handle("POST /v1/notifications/{id}/read", api.authed(api.noContent(api.markNotificationRead)))
 	}
 	return mux
 }

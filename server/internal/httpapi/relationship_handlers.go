@@ -148,3 +148,18 @@ func (a *API) acceptProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, rel)
 }
+
+func (a *API) listNotifications(w http.ResponseWriter, r *http.Request) {
+	ns, err := a.Relationships.ListNotifications(r.Context(), principal(r))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Notifications []relationship.Notification `json:"notifications"`
+	}{nonNil(ns)})
+}
+
+func (a *API) markNotificationRead(r *http.Request) error {
+	return a.Relationships.MarkNotificationRead(r.Context(), principal(r), r.PathValue("id"))
+}

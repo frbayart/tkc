@@ -361,3 +361,109 @@ func TestConnectionRevocationCascades(t *testing.T) {
 		t.Fatalf("relationship restored to %s", s)
 	}
 }
+
+func TestRemovingChildDeletesRelationships(t *testing.T) {
+	e := newEnv(t)
+	pa, pb := e.family(t), e.family(t)
+	ka, kb := e.child(t, pa), e.child(t, pb)
+	r := e.exchange(t, ka, kb)
+	_, _ = e.rel.Approve(ctx, pa, r.ID, openPolicy())
+	_, _ = e.rel.Approve(ctx, pb, r.ID, openPolicy())
+
+	// Give child B a device that has sent a message in the relationship.
+	code, _, err := e.ids.CreateEnrollment(ctx, pb, kb.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := deviceKeys(t)
+	devID, _, err := e.ids.Enroll(ctx, code, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ids.ApproveDevice(ctx, pb, devID, keys.IdentityPublicKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.rel.pool.Exec(ctx, `INSERT INTO messages (relationship_id, sender_device_id, ciphertext)
+		VALUES ($1, $2, 'opaque')`, r.ID, devID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.ids.RemoveUser(ctx, pb, kb.UserID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.rel.Get(ctx, pa, r.ID)
+	mustErr(t, err, identity.ErrNotFound)
+	if _, err := e.rel.Effective(ctx, r.ID); !errors.Is(err, ErrNotActive) {
+		t.Fatalf("effective after removal: %v", err)
+	}
+	var n int
+	if err := e.rel.pool.QueryRow(ctx, `SELECT count(*) FROM messages`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("messages left: %d (%v)", n, err)
+	}
+}
+
+func TestChildBlockNotifiesParents(t *testing.T) {
+	e := newEnv(t)
+	pa, pb := e.family(t), e.family(t)
+	ka, kb := e.child(t, pa), e.child(t, pb)
+	r := e.exchange(t, ka, kb)
+	_, _ = e.rel.Approve(ctx, pa, r.ID, openPolicy())
+	_, _ = e.rel.Approve(ctx, pb, r.ID, openPolicy())
+
+	if err := e.rel.Revoke(ctx, kb, r.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Child B's parents are notified; the other family is not.
+	ns, err := e.rel.ListNotifications(ctx, pb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ns) != 1 || ns[0].Kind != "relationship_blocked_by_child" ||
+		*ns[0].RelationshipID != r.ID || *ns[0].ChildID != kb.UserID || ns[0].ReadAt != nil {
+		t.Fatalf("notifications %+v", ns)
+	}
+	if other, _ := e.rel.ListNotifications(ctx, pa); len(other) != 0 {
+		t.Fatalf("other family notified %+v", other)
+	}
+
+	// Both families see who revoked and why.
+	db, _ := e.rel.Get(ctx, pb, r.ID)
+	da, _ := e.rel.Get(ctx, pa, r.ID)
+	if db.RevocationReason != "child_block" || !db.RevokedByUs || da.RevocationReason != "child_block" || da.RevokedByUs {
+		t.Fatalf("revocation seen by B %+v, by A %+v", db.Relationship, da.Relationship)
+	}
+
+	// Children cannot read notifications; only the family's parents mark them.
+	_, err = e.rel.ListNotifications(ctx, kb)
+	mustErr(t, err, identity.ErrForbidden)
+	mustErr(t, e.rel.MarkNotificationRead(ctx, pa, ns[0].ID), identity.ErrNotFound)
+	if err := e.rel.MarkNotificationRead(ctx, pb, ns[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	ns, _ = e.rel.ListNotifications(ctx, pb)
+	if ns[0].ReadAt == nil {
+		t.Fatal("notification not marked read")
+	}
+
+	// A parent's revocation does not notify and is labelled as such.
+	r2 := e.exchange(t, ka, kb)
+	if err := e.rel.Revoke(ctx, pa, r2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := e.rel.Get(ctx, pb, r2.ID); d.RevocationReason != "parent" || d.RevokedByUs {
+		t.Fatalf("parent revocation %+v", d.Relationship)
+	}
+	if ns, _ := e.rel.ListNotifications(ctx, pb); len(ns) != 1 {
+		t.Fatalf("parent revocation notified %+v", ns)
+	}
+
+	// Connection revocation is labelled too.
+	conn := e.connect(t, pa, pb)
+	pr, _ := e.rel.Propose(ctx, pa, conn, ka.UserID, openPolicy())
+	r3, _ := e.rel.AcceptProposal(ctx, pb, pr.ID, kb.UserID, openPolicy())
+	_ = e.rel.RevokeConnection(ctx, pb, conn)
+	if d, _ := e.rel.Get(ctx, pa, r3.ID); d.RevocationReason != "connection_revoked" || d.RevokedByUs {
+		t.Fatalf("connection revocation %+v", d.Relationship)
+	}
+}
