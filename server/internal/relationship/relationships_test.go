@@ -362,7 +362,7 @@ func TestConnectionRevocationCascades(t *testing.T) {
 	}
 }
 
-func TestRemovingChildDeletesRelationships(t *testing.T) {
+func TestRemovingChildKeepsEvidenceThenPurges(t *testing.T) {
 	e := newEnv(t)
 	pa, pb := e.family(t), e.family(t)
 	ka, kb := e.child(t, pa), e.child(t, pb)
@@ -387,18 +387,52 @@ func TestRemovingChildDeletesRelationships(t *testing.T) {
 		VALUES ($1, $2, 'opaque')`, r.ID, devID); err != nil {
 		t.Fatal(err)
 	}
+	messages := func() (n int) {
+		if err := e.rel.pool.QueryRow(ctx, `SELECT count(*) FROM messages`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// A pending proposal of the removed child is cancelled.
+	conn := e.connect(t, pa, pb)
+	if _, err := e.rel.Propose(ctx, pb, conn, kb.UserID, openPolicy()); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := e.ids.RemoveUser(ctx, pb, kb.UserID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.rel.Get(ctx, pa, r.ID)
-	mustErr(t, err, identity.ErrNotFound)
+
+	// Communication stops immediately...
 	if _, err := e.rel.Effective(ctx, r.ID); !errors.Is(err, ErrNotActive) {
 		t.Fatalf("effective after removal: %v", err)
 	}
-	var n int
-	if err := e.rel.pool.QueryRow(ctx, `SELECT count(*) FROM messages`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("messages left: %d (%v)", n, err)
+	if ps, _ := e.rel.ListProposals(ctx, pa); len(ps) != 0 {
+		t.Fatalf("proposals of removed child %+v", ps)
+	}
+	// ...but both families keep the evidence.
+	for _, p := range []identity.Principal{pa, pb} {
+		d, err := e.rel.Get(ctx, p, r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Status != "revoked" || d.RevocationReason != "member_removed" {
+			t.Fatalf("relationship after removal %+v", d.Relationship)
+		}
+	}
+	if messages() != 1 {
+		t.Fatal("messages deleted before the end of evidence retention")
+	}
+
+	// After the retention period, everything is purged.
+	e.ids.Now = func() time.Time { return e.clk.now().Add(identity.DefaultEvidenceRetention) }
+	if n, err := e.ids.PurgeRemovedMembers(ctx); err != nil || n != 1 {
+		t.Fatalf("purge n=%d err=%v", n, err)
+	}
+	_, err = e.rel.Get(ctx, pa, r.ID)
+	mustErr(t, err, identity.ErrNotFound)
+	if messages() != 0 {
+		t.Fatal("messages left after purge")
 	}
 }
 

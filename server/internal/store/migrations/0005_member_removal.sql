@@ -1,6 +1,7 @@
--- Removing a family member deletes the account and everything attached to it
--- (devices, sessions, relationships, their messages and calls). These two
--- references would otherwise block the deletion. See spec/identity-family.md.
+-- Purging a removed family member (after the evidence retention period, see
+-- 0007) deletes the account and everything attached to it (devices,
+-- sessions, relationships, their messages and calls). These two references
+-- would otherwise block the deletion. See spec/identity-family.md.
 
 -- A device approved by a removed parent's device stays active; only the
 -- audit link is cleared.

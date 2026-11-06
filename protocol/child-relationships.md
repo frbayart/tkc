@@ -84,7 +84,7 @@ stateDiagram-v2
 | Revoke / decline | A parent of either family, or **a child of the relationship (block)**, whose parents are then notified |
 
 - **A child can block a relationship alone**, without waiting for their parents. The block takes effect immediately, and the child's parents receive a `relationship_blocked_by_child` notification so they can talk about it with the child. The other family sees that the relationship was blocked by the other child, but is not notified.
-- Every revoked relationship records which family revoked it and why: `parent`, `child_block` or `connection_revoked`.
+- Every revoked relationship records which family revoked it and why: `parent`, `child_block`, `connection_revoked` or `member_removed`. Revoked relationships and their messages are kept as evidence for both families (see [spec/retention.md](../spec/retention.md#evidence-retention)).
 - Revocation is immediate and final: a revoked relationship never becomes active again. The children can start a new exchange later, which requires new approvals.
 - **Revoking a family connection revokes every relationship between the children of the two families** (whatever their origin) and cancels pending proposals. Reconnecting does not restore them.
 - **Starting over after a revocation.** Revoked relationships are kept as history for parents (status `revoked`, with the reason) but are never reactivated. The families and children can start again from zero, like new contacts:

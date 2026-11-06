@@ -75,6 +75,24 @@ Parents should be able to understand:
 - why a recording is retained;
 - whether only metadata will remain afterward.
 
+## Evidence retention
+
+Communication involving minors may later be needed as **evidence**: legal proceedings, harassment, or psychological follow-up. Evidence matters to **both families** of a relationship, not only to the family that ends it.
+
+Rules implemented so far:
+
+- **Ending a relationship never deletes it.** Revoking, blocking, or revoking the family connection keeps the relationship, its history and its (encrypted) messages; both families' parents can still see it, with who revoked it and why.
+- **Removing a member does not delete data immediately.** The account is retired at once, but its data is kept until `purge_after = removed_at + evidence retention period`, then permanently deleted with everything attached to it. A background job runs the purge every hour.
+- The evidence retention period is configurable (`tkc-server -evidence-retention`, default **365 days**). **This default is provisional and requires legal review**, possibly per jurisdiction.
+
+The provider only keeps ciphertext: evidence is readable only by the parents' devices that hold the keys, which is consistent with the legal-access model in [messaging-cryptography.md](messaging-cryptography.md).
+
+Open points:
+
+- **Conflict with short recording retention.** The recording retention policy above may delete call recordings after a few days, which can destroy evidence. A parental **preservation hold** on a relationship (suspending deletion until released or until a maximum date) is proposed.
+- **Message retention** in general is not yet defined; until it is, messages are kept as long as their relationship exists.
+- Whether a family may request earlier deletion of its own child's data (privacy rights) versus the other family's interest in evidence needs legal review.
+
 ## Open questions
 
 Final retention defaults require both product and legal review, particularly because the retained content concerns minors and may contain highly private domestic audio/video.

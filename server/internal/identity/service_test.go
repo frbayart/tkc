@@ -415,6 +415,7 @@ func TestRemoveUser(t *testing.T) {
 
 	// The founder, whose device approved the guardian's, can be removed while
 	// another parent device remains; the guardian's device stays active.
+	// Removed members are hidden from the family.
 	if err := s.RemoveUser(ctx, guardian, founder.UserID); err != nil {
 		t.Fatal(err)
 	}
@@ -422,11 +423,44 @@ func TestRemoveUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Members) != 1 || f.Members[0].UserID != guardianID ||
-		f.Members[0].Devices[0].Status != "active" || f.Members[0].Devices[0].ApprovedByDeviceID != nil {
+	if len(f.Members) != 1 || f.Members[0].UserID != guardianID || f.Members[0].Devices[0].Status != "active" {
 		t.Fatalf("family after removals %+v", f)
 	}
+	// The removed founder's device can no longer authenticate.
+	nonce, _, _ := s.Challenge(ctx, founder.DeviceID)
+	msg, _ := ChallengeMessage(founder.DeviceID, nonce)
+	_, _, err = s.CreateSession(ctx, founder.DeviceID, nonce, ed25519.Sign(d1.priv, msg))
+	mustErr(t, err, ErrUnauthenticated)
+	// A removed member cannot get new devices.
+	_, _, err = s.CreateEnrollment(ctx, guardian, childID)
+	mustErr(t, err, ErrNotFound)
 
 	// The last parent cannot be removed.
 	mustErr(t, s.RemoveUser(ctx, guardian, guardianID), ErrLastParentDevice)
+}
+
+func TestPurgeRemovedMembers(t *testing.T) {
+	s, c := newService(t)
+	parent, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
+	kid, _ := s.AddUser(ctx, parent, RoleChild, "UTC")
+	kept, _ := s.AddUser(ctx, parent, RoleChild, "UTC")
+	if err := s.RemoveUser(ctx, parent, kid); err != nil {
+		t.Fatal(err)
+	}
+	count := func() (n int) {
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE id IN ($1, $2)`, kid, kept).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// Kept as evidence until the retention period has elapsed.
+	c.advance(DefaultEvidenceRetention - time.Minute)
+	if n, err := s.PurgeRemovedMembers(ctx); err != nil || n != 0 || count() != 2 {
+		t.Fatalf("purged too early: n=%d err=%v", n, err)
+	}
+	c.advance(time.Minute)
+	if n, err := s.PurgeRemovedMembers(ctx); err != nil || n != 1 || count() != 1 {
+		t.Fatalf("purge: n=%d err=%v count=%d", n, err, count())
+	}
 }

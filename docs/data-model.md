@@ -43,7 +43,8 @@ erDiagram
         text role "parent | child"
         text time_zone "IANA"
         bytea profile_ciphertext "client-side encrypted"
-        text status
+        text status "active | disabled | removed"
+        timestamptz purge_after "end of evidence retention"
     }
     devices {
         uuid id PK
@@ -81,7 +82,7 @@ erDiagram
         text status "proposed | pending | active | suspended | revoked"
         text origin "in_person | parent"
         uuid suspended_by FK "only it can resume"
-        text revocation_reason "parent | child_block | connection_revoked"
+        text revocation_reason "parent | child_block | connection_revoked | member_removed"
         timestamptz approved_a_at
         timestamptz approved_b_at
     }
@@ -134,7 +135,7 @@ erDiagram
 
 | Table | Invariant |
 |---|---|
-| `users` | role is `parent` or `child` |
+| `users` | role is `parent` or `child`; `removed` ⇔ `removed_at` and `purge_after` set, with `purge_after` after `removed_at` |
 | `devices` | `revoked` ⇔ `revoked_at` set; identity keys are unique |
 | `family_connections` | one row per pair of families, canonical order `family_a < family_b`; the issuer is one of the pair; `active` requires `confirmed_at`; `revoked` ⇔ `revoked_at` |
 | `invitations` | only the token hash is stored; `child_exchange` ⇔ a child **of the issuer family**; cannot be both consumed and revoked; finite expiry |

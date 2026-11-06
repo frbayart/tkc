@@ -112,7 +112,7 @@ stateDiagram-v2
 | `POST /v1/auth/logout` | device | Delete the current session |
 | `GET /v1/family` | device | Family members and all their device public keys |
 | `POST /v1/users` | parent | Add a child or a guardian |
-| `DELETE /v1/users/{id}` | parent | Remove a member and everything attached to it (refused if no active parent device would remain) |
+| `DELETE /v1/users/{id}` | parent | Retire a member immediately; its data is kept as evidence, then purged (refused if no active parent device would remain) |
 | `POST /v1/users/{id}/enrollments` | parent | Issue an enrollment code |
 | `POST /v1/devices/enroll` | — | Register a pending device with a code |
 | `POST /v1/devices/{id}/approve` | parent | Approve a pending device |
