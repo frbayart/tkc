@@ -467,3 +467,71 @@ func TestChildBlockNotifiesParents(t *testing.T) {
 		t.Fatalf("connection revocation %+v", d.Relationship)
 	}
 }
+
+// After a family connection is revoked, everything can be rebuilt from
+// scratch, like new contacts: a new invitation and confirmation, then new
+// relationships with new approvals and policies.
+func TestRestartAfterConnectionRevocation(t *testing.T) {
+	e := newEnv(t)
+	pa, pb := e.family(t), e.family(t)
+	ka, kb := e.child(t, pa), e.child(t, pb)
+
+	conn := e.connect(t, pa, pb)
+	pr, _ := e.rel.Propose(ctx, pa, conn, ka.UserID, openPolicy())
+	old, err := e.rel.AcceptProposal(ctx, pb, pr.ID, kb.UserID, openPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.rel.RevokeConnection(ctx, pa, conn); err != nil {
+		t.Fatal(err)
+	}
+
+	// While the families are disconnected, no proposal is possible...
+	_, err = e.rel.Propose(ctx, pa, conn, ka.UserID, openPolicy())
+	mustErr(t, err, identity.ErrNotFound)
+
+	// ...but the children may meet again in person: a brand new relationship
+	// that both families must approve again, with fresh policies.
+	r := e.exchange(t, kb, ka)
+	if r.ID == old.ID || r.Status != "proposed" || r.ApprovedByUs || r.ApprovedByThem {
+		t.Fatalf("new in-person relationship %+v", r)
+	}
+	if d, _ := e.rel.Get(ctx, pa, r.ID); d.OurPolicy != nil {
+		t.Fatalf("old policy carried over %+v", d.OurPolicy)
+	}
+	_ = e.rel.Revoke(ctx, pb, r.ID)
+
+	// Reconnecting requires a new invitation and confirmation.
+	inv, _ := e.rel.CreateInvitation(ctx, pb)
+	c, err := e.rel.AcceptInvitation(ctx, pa, inv.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Status != "pending" {
+		t.Fatalf("reconnection %+v", c)
+	}
+	if err := e.rel.ConfirmConnection(ctx, pb, c.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Then a new proposal creates a new relationship; the old one stays
+	// revoked as history.
+	pr2, err := e.rel.Propose(ctx, pb, c.ID, kb.UserID, strictPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := e.rel.AcceptProposal(ctx, pa, pr2.ID, ka.UserID, openPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.ID == old.ID || fresh.Status != "active" {
+		t.Fatalf("fresh relationship %+v", fresh)
+	}
+	if d, _ := e.rel.Get(ctx, pa, old.ID); d.Status != "revoked" || d.RevocationReason != "connection_revoked" {
+		t.Fatalf("history %+v", d.Relationship)
+	}
+	eff, err := e.rel.Effective(ctx, fresh.ID)
+	if err != nil || eff.Video.Enabled {
+		t.Fatalf("fresh effective policy %+v (%v)", eff, err)
+	}
+}

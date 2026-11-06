@@ -87,6 +87,10 @@ stateDiagram-v2
 - Every revoked relationship records which family revoked it and why: `parent`, `child_block` or `connection_revoked`.
 - Revocation is immediate and final: a revoked relationship never becomes active again. The children can start a new exchange later, which requires new approvals.
 - **Revoking a family connection revokes every relationship between the children of the two families** (whatever their origin) and cancels pending proposals. Reconnecting does not restore them.
+- **Starting over after a revocation.** Revoked relationships are kept as history for parents (status `revoked`, with the reason) but are never reactivated. The families and children can start again from zero, like new contacts:
+  - the children can do a new in-person exchange at any time, even while the families are disconnected; it creates a new relationship that both families must approve again with new policies;
+  - the families can reconnect with a new invitation and confirmation, after which parents can make new proposals.
+  Nothing is carried over from the old relationships: no approval and no policy.
 - Only `active` relationships allow communication. Messaging and signaling obtain the effective policy from `relationship.Service.Effective`, which fails for any other status or if a policy is missing.
 
 ## Visibility
