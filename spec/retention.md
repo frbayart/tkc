@@ -91,8 +91,12 @@ The provider only keeps ciphertext: evidence is readable only by the parents' de
 
 Open points:
 
-- **Conflict with short recording retention.** The recording retention policy above may delete call recordings after a few days, which can destroy evidence. A parental **preservation hold** on a relationship (suspending deletion until released or until a maximum date) is proposed.
-- **Message retention** in general is not yet defined; until it is, messages are kept as long as their relationship exists.
+- **Preservation hold.** A parent of either family can place a hold on a relationship, including an ended one, while a concern is being investigated. While a hold is active:
+  - **no call recording of the relationship is deleted**, whatever the recording policy (reason `preservation_hold`, see `retention.ComputeWithHold`);
+  - the **purge of a removed member** involved in the relationship is deferred.
+
+  Each family manages its own hold and only it can release it; the other family does not see it. A hold lasts **365 days by default and can be renewed**, so that none lasts forever by oversight (provisional value, pending legal review). When it ends, normal retention applies again.
+- **Message retention.** Messages are kept as long as their relationship exists (and therefore during the evidence retention period of a removed member). A technical maximum is likely to be introduced later; it must not apply while a preservation hold is active.
 - Whether a family may request earlier deletion of its own child's data (privacy rights) versus the other family's interest in evidence needs legal review.
 
 ## Open questions

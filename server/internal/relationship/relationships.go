@@ -438,7 +438,9 @@ type EffectiveView struct {
 type Details struct {
 	Relationship
 	OurPolicy *policy.FamilyPolicy `json:"our_policy,omitempty"`
-	Effective *EffectiveView       `json:"effective,omitempty"`
+	// OurHold is the caller's family preservation hold (parents only).
+	OurHold   *Hold          `json:"our_hold,omitempty"`
+	Effective *EffectiveView `json:"effective,omitempty"`
 }
 
 // Get returns a relationship visible to the caller. A family's own raw
@@ -456,8 +458,11 @@ func (s *Service) Get(ctx context.Context, p identity.Principal, id string) (Det
 		if err != nil {
 			return err
 		}
-		if p.Role == identity.RoleParent && pols[x.side(p.FamilyID)] != nil {
+		if p.Role == identity.RoleParent {
 			d.OurPolicy = pols[x.side(p.FamilyID)]
+			if d.OurHold, err = ourHold(ctx, tx, x.id, p.FamilyID, s.Now()); err != nil {
+				return err
+			}
 		}
 		if pols[0] != nil && pols[1] != nil {
 			e, err := policy.Intersect(*pols[0], *pols[1])

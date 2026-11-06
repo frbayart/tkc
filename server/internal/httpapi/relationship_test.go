@@ -175,3 +175,29 @@ func TestChildBlockNotificationHTTP(t *testing.T) {
 	c.expect(404, "POST", "/v1/notifications/"+ns.Notifications[0].ID+"/read", parentA, nil, nil)
 	c.expect(204, "POST", "/v1/notifications/"+ns.Notifications[0].ID+"/read", parentB, nil, nil)
 }
+
+func TestPreservationHoldHTTP(t *testing.T) {
+	c := newClient(t)
+	parentA, _ := c.newParent()
+	parentB, _ := c.newParent()
+	_, tokenKidA := c.newChild(parentA)
+	_, tokenKidB := c.newChild(parentB)
+	var ec relationship.ExchangeCode
+	c.expect(201, "POST", "/v1/exchange-codes", tokenKidA, nil, &ec)
+	var rel relationship.Relationship
+	c.expect(201, "POST", "/v1/exchange-codes/redeem", tokenKidB, map[string]string{"code": ec.Code}, &rel)
+
+	c.expect(403, "POST", "/v1/relationships/"+rel.ID+"/hold", tokenKidA, nil, nil)
+	var h relationship.Hold
+	c.expect(200, "POST", "/v1/relationships/"+rel.ID+"/hold", parentA, nil, &h)
+	if h.ExpiresAt.IsZero() {
+		t.Fatalf("hold %+v", h)
+	}
+	var d relationship.Details
+	c.expect(200, "GET", "/v1/relationships/"+rel.ID, parentA, nil, &d)
+	if d.OurHold == nil {
+		t.Fatal("hold not shown")
+	}
+	c.expect(404, "DELETE", "/v1/relationships/"+rel.ID+"/hold", parentB, nil, nil)
+	c.expect(204, "DELETE", "/v1/relationships/"+rel.ID+"/hold", parentA, nil, nil)
+}

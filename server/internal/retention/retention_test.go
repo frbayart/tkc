@@ -204,3 +204,39 @@ func TestProperties(t *testing.T) {
 		}
 	}
 }
+
+func TestPreservationHold(t *testing.T) {
+	recs := []Recording{rec("new", time.Hour), rec("old", 30*day), rec("ancient", 200*day)}
+	holdUntil := now.Add(70 * day)
+
+	plan := ComputeWithHold(recs, specPolicy, now, holdUntil)
+	for _, d := range plan.Decisions {
+		if !d.Keep {
+			t.Fatalf("%s deleted under hold", d.Recording.ID)
+		}
+	}
+	// The latest recording's normal expiry (90 days) is later than the hold:
+	// it keeps its own reason; the others are kept by the hold.
+	reasons := map[string]Reason{}
+	for _, d := range plan.Decisions {
+		reasons[d.Recording.ID] = d.Reason
+	}
+	if reasons["new"] != ReasonLongTerm || reasons["old"] != ReasonPreservationHold || reasons["ancient"] != ReasonPreservationHold {
+		t.Fatalf("reasons %v", reasons)
+	}
+	if !plan.NextEvaluation.Equal(holdUntil) {
+		t.Fatalf("NextEvaluation = %v, want hold end %v", plan.NextEvaluation, holdUntil)
+	}
+
+	// The hold applies even when recording has been disabled.
+	if p := ComputeWithHold(recs, policy.RecordingPolicy{}, now, holdUntil); len(p.Keep()) != 3 {
+		t.Fatalf("disabled + hold kept %d", len(p.Keep()))
+	}
+
+	// An expired hold has no effect.
+	expired := ComputeWithHold(recs, specPolicy, now, now.Add(-time.Second))
+	normal := Compute(recs, specPolicy, now)
+	if len(expired.Keep()) != len(normal.Keep()) {
+		t.Fatal("expired hold changed the plan")
+	}
+}

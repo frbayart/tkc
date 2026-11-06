@@ -31,6 +31,7 @@ type Service struct {
 	Now           func() time.Time
 	InvitationTTL time.Duration
 	ExchangeTTL   time.Duration
+	HoldDuration  time.Duration
 }
 
 func isUniqueViolation(err error) bool {
@@ -40,7 +41,7 @@ func isUniqueViolation(err error) bool {
 
 // New returns a service with default settings.
 func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, Now: time.Now, InvitationTTL: DefaultInvitationTTL, ExchangeTTL: DefaultExchangeTTL}
+	return &Service{pool: pool, Now: time.Now, InvitationTTL: DefaultInvitationTTL, ExchangeTTL: DefaultExchangeTTL, HoldDuration: DefaultHoldDuration}
 }
 
 func requireParent(p identity.Principal) error {

@@ -163,3 +163,16 @@ func (a *API) listNotifications(w http.ResponseWriter, r *http.Request) {
 func (a *API) markNotificationRead(r *http.Request) error {
 	return a.Relationships.MarkNotificationRead(r.Context(), principal(r), r.PathValue("id"))
 }
+
+func (a *API) setHold(w http.ResponseWriter, r *http.Request) {
+	h, err := a.Relationships.SetHold(r.Context(), principal(r), r.PathValue("id"))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
+}
+
+func (a *API) releaseHold(r *http.Request) error {
+	return a.Relationships.ReleaseHold(r.Context(), principal(r), r.PathValue("id"))
+}

@@ -41,8 +41,9 @@ type Reason string
 // Reasons.
 const (
 	// Kept.
-	ReasonRecent   Reason = "recent"
-	ReasonLongTerm Reason = "long_term"
+	ReasonRecent           Reason = "recent"
+	ReasonLongTerm         Reason = "long_term"
+	ReasonPreservationHold Reason = "preservation_hold"
 	// Deleted.
 	ReasonRecordingDisabled Reason = "recording_disabled"
 	ReasonCountExceeded     Reason = "count_exceeded"
@@ -89,6 +90,14 @@ const day = 24 * time.Hour
 
 // Compute plans the retention of recordings under the effective policy at now.
 func Compute(recordings []Recording, p policy.RecordingPolicy, now time.Time) Plan {
+	return ComputeWithHold(recordings, p, now, time.Time{})
+}
+
+// ComputeWithHold is Compute for a relationship that may be under a
+// preservation hold until holdUntil (zero if none). While the hold is active,
+// every recording is kept, whatever the policy, at least until the hold ends;
+// the plan must then be computed again.
+func ComputeWithHold(recordings []Recording, p policy.RecordingPolicy, now, holdUntil time.Time) Plan {
 	recs := slices.Clone(recordings)
 	// Most recent first; ties broken by ID so the result is deterministic.
 	slices.SortFunc(recs, func(a, b Recording) int {
@@ -101,6 +110,9 @@ func Compute(recordings []Recording, p policy.RecordingPolicy, now time.Time) Pl
 	plan := Plan{Decisions: make([]Decision, 0, len(recs))}
 	for rank, r := range recs {
 		d := decide(r, rank, p, now)
+		if holdUntil.After(now) && (!d.Keep || d.ExpiresAt.Before(holdUntil)) {
+			d = Decision{Recording: r, Keep: true, Reason: ReasonPreservationHold, ExpiresAt: holdUntil}
+		}
 		if d.Keep && (plan.NextEvaluation.IsZero() || d.ExpiresAt.Before(plan.NextEvaluation)) {
 			plan.NextEvaluation = d.ExpiresAt
 		}

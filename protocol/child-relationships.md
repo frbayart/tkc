@@ -112,6 +112,8 @@ stateDiagram-v2
 | `POST /v1/relationships/{id}/suspend` | parent | Suspend |
 | `POST /v1/relationships/{id}/resume` | parent | Resume (suspending family) |
 | `POST /v1/relationships/{id}/revoke` | parent or child participant | Revoke, decline or block |
+| `POST /v1/relationships/{id}/hold` | parent | Place or renew the family's preservation hold (see [spec/retention.md](../spec/retention.md#evidence-retention)) |
+| `DELETE /v1/relationships/{id}/hold` | parent | Release the family's own hold |
 | `GET /v1/notifications` | parent | Family notifications, newest first (at most 100) |
 | `POST /v1/notifications/{id}/read` | parent | Mark a notification as read for all parents of the family |
 | `POST /v1/family-connections/{id}/proposals` | parent | Propose `{child_id, policy}` |

@@ -68,6 +68,8 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("POST /v1/relationships/{id}/suspend", api.authed(api.noContent(api.suspendRelationship)))
 		mux.Handle("POST /v1/relationships/{id}/resume", api.authed(api.noContent(api.resumeRelationship)))
 		mux.Handle("POST /v1/relationships/{id}/revoke", api.authed(api.noContent(api.revokeRelationship)))
+		mux.Handle("POST /v1/relationships/{id}/hold", api.authed(api.setHold))
+		mux.Handle("DELETE /v1/relationships/{id}/hold", api.authed(api.noContent(api.releaseHold)))
 
 		mux.Handle("GET /v1/notifications", api.authed(api.listNotifications))
 		mux.Handle("POST /v1/notifications/{id}/read", api.authed(api.noContent(api.markNotificationRead)))

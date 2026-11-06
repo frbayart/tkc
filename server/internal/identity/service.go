@@ -392,10 +392,15 @@ func (s *Service) evidenceRetention() time.Duration {
 }
 
 // PurgeRemovedMembers permanently deletes removed members whose evidence
-// retention period has elapsed, with everything attached to them. It returns
+// retention period has elapsed, with everything attached to them, unless a
+// preservation hold is active on one of their relationships. It returns
 // the number of members purged. It is meant to run periodically.
 func (s *Service) PurgeRemovedMembers(ctx context.Context) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM users WHERE status = 'removed' AND purge_after <= $1`, s.Now())
+	// Members involved in a relationship under an active preservation hold
+	// are kept until the hold is released or expires.
+	tag, err := s.pool.Exec(ctx, `DELETE FROM users u WHERE u.status = 'removed' AND u.purge_after <= $1
+		AND NOT EXISTS (SELECT 1 FROM preservation_holds h JOIN relationships r ON r.id = h.relationship_id
+			WHERE h.released_at IS NULL AND h.expires_at > $1 AND u.id IN (r.child_a, r.child_b))`, s.Now())
 	if err != nil {
 		return 0, err
 	}

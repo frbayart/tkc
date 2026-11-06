@@ -569,3 +569,93 @@ func TestRestartAfterConnectionRevocation(t *testing.T) {
 		t.Fatalf("fresh effective policy %+v (%v)", eff, err)
 	}
 }
+
+func TestPreservationHold(t *testing.T) {
+	e := newEnv(t)
+	pa, pb := e.family(t), e.family(t)
+	ka, kb := e.child(t, pa), e.child(t, pb)
+	r := e.exchange(t, ka, kb)
+	_, _ = e.rel.Approve(ctx, pa, r.ID, openPolicy())
+	_, _ = e.rel.Approve(ctx, pb, r.ID, openPolicy())
+	// Holds also apply to ended relationships, the usual case.
+	_ = e.rel.Revoke(ctx, kb, r.ID)
+
+	_, err := e.rel.SetHold(ctx, kb, r.ID)
+	mustErr(t, err, identity.ErrForbidden)
+	_, err = e.rel.SetHold(ctx, e.family(t), r.ID)
+	mustErr(t, err, identity.ErrNotFound)
+
+	h, err := e.rel.SetHold(ctx, pa, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.ExpiresAt.Equal(e.clk.now().Add(DefaultHoldDuration)) {
+		t.Fatalf("hold %+v", h)
+	}
+	if until, _ := e.rel.HoldUntil(ctx, r.ID); !until.Equal(h.ExpiresAt) {
+		t.Fatalf("HoldUntil %v", until)
+	}
+	// Each family sees only its own hold.
+	if d, _ := e.rel.Get(ctx, pa, r.ID); d.OurHold == nil {
+		t.Fatal("A does not see its hold")
+	}
+	if d, _ := e.rel.Get(ctx, pb, r.ID); d.OurHold != nil {
+		t.Fatal("B sees A's hold")
+	}
+	// Only the family that set a hold releases it.
+	mustErr(t, e.rel.ReleaseHold(ctx, pb, r.ID), identity.ErrNotFound)
+
+	// Renewal extends it.
+	e.clk.advance(24 * time.Hour)
+	h2, _ := e.rel.SetHold(ctx, pa, r.ID)
+	if !h2.ExpiresAt.After(h.ExpiresAt) || !h2.CreatedAt.Equal(h.CreatedAt) {
+		t.Fatalf("renewed %+v (was %+v)", h2, h)
+	}
+
+	// The removed child's purge is deferred while the hold is active.
+	removedAt := e.clk.now()
+	if err := e.ids.RemoveUser(ctx, pb, kb.UserID); err != nil {
+		t.Fatal(err)
+	}
+	// Renewed after the removal, the hold outlasts the evidence retention.
+	e.clk.advance(time.Hour)
+	if _, err := e.rel.SetHold(ctx, pa, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	afterRetention := removedAt.Add(identity.DefaultEvidenceRetention)
+	e.ids.Now = func() time.Time { return afterRetention }
+	if n, err := e.ids.PurgeRemovedMembers(ctx); err != nil || n != 0 {
+		t.Fatalf("purged under hold: n=%d err=%v", n, err)
+	}
+
+	// Once released, the purge proceeds.
+	if err := e.rel.ReleaseHold(ctx, pa, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if until, _ := e.rel.HoldUntil(ctx, r.ID); !until.IsZero() {
+		t.Fatalf("HoldUntil after release %v", until)
+	}
+	if n, err := e.ids.PurgeRemovedMembers(ctx); err != nil || n != 1 {
+		t.Fatalf("purge after release: n=%d err=%v", n, err)
+	}
+}
+
+func TestExpiredHoldStopsApplying(t *testing.T) {
+	e := newEnv(t)
+	pa, pb := e.family(t), e.family(t)
+	r := e.exchange(t, e.child(t, pa), e.child(t, pb))
+	if _, err := e.rel.SetHold(ctx, pa, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.advance(DefaultHoldDuration)
+	if until, _ := e.rel.HoldUntil(ctx, r.ID); !until.IsZero() {
+		t.Fatalf("expired hold still active until %v", until)
+	}
+	if d, _ := e.rel.Get(ctx, pa, r.ID); d.OurHold != nil {
+		t.Fatal("expired hold still shown")
+	}
+	// It can be placed again.
+	if _, err := e.rel.SetHold(ctx, pa, r.ID); err != nil {
+		t.Fatal(err)
+	}
+}
