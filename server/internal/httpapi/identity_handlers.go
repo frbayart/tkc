@@ -177,3 +177,31 @@ func (a *API) removeUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (a *API) createProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PreviousID string `json:"previous_id"`
+		Ciphertext []byte `json:"ciphertext"`
+		Signature  []byte `json:"signature"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	pr, err := a.Identity.CreateProfile(r.Context(), principal(r), r.PathValue("id"), req.PreviousID, req.Ciphertext, req.Signature)
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, pr)
+}
+
+func (a *API) profileHistory(w http.ResponseWriter, r *http.Request) {
+	ps, err := a.Identity.ProfileHistory(r.Context(), principal(r), r.PathValue("id"))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Profiles []identity.Profile `json:"profiles"`
+	}{nonNil(ps)})
+}

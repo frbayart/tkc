@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"crypto/ed25519"
 	"testing"
 
+	"github.com/frbayart/tkc/server/internal/identity"
 	"github.com/frbayart/tkc/server/internal/relationship"
 )
 
@@ -200,4 +202,33 @@ func TestPreservationHoldHTTP(t *testing.T) {
 	}
 	c.expect(404, "DELETE", "/v1/relationships/"+rel.ID+"/hold", parentB, nil, nil)
 	c.expect(204, "DELETE", "/v1/relationships/"+rel.ID+"/hold", parentA, nil, nil)
+}
+
+func TestProfilesHTTP(t *testing.T) {
+	c := newClient(t)
+	d := newTestDevice(t)
+	var fam principalJSON
+	c.expect(201, "POST", "/v1/families", "", map[string]any{"time_zone": "UTC", "device": d.json}, &fam)
+	token := c.login(fam.DeviceID, d)
+
+	ct := []byte("enc(Parent)")
+	msg, _ := identity.ProfileMessage(fam.UserID, 1, "", ct)
+	var v1 identity.Profile
+	c.expect(400, "POST", "/v1/users/"+fam.UserID+"/profiles", token,
+		map[string]any{"ciphertext": ct, "signature": make([]byte, 64)}, nil)
+	c.expect(201, "POST", "/v1/users/"+fam.UserID+"/profiles", token,
+		map[string]any{"ciphertext": ct, "signature": ed25519.Sign(d.priv, msg)}, &v1)
+	c.expect(409, "POST", "/v1/users/"+fam.UserID+"/profiles", token,
+		map[string]any{"ciphertext": ct, "signature": ed25519.Sign(d.priv, msg)}, nil)
+
+	var h struct{ Profiles []identity.Profile }
+	c.expect(200, "GET", "/v1/users/"+fam.UserID+"/profiles", token, nil, &h)
+	if len(h.Profiles) != 1 || h.Profiles[0].ID != v1.ID {
+		t.Fatalf("history %+v", h)
+	}
+	var f identity.Family
+	c.expect(200, "GET", "/v1/family", token, nil, &f)
+	if f.Members[0].Profile == nil || f.Members[0].Profile.ID != v1.ID {
+		t.Fatalf("family %+v", f)
+	}
 }

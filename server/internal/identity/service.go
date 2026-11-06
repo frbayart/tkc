@@ -518,12 +518,13 @@ type Device struct {
 
 // Member is the public view of a family member.
 type Member struct {
-	UserID            string   `json:"user_id"`
-	Role              Role     `json:"role"`
-	TimeZone          string   `json:"time_zone"`
-	Status            string   `json:"status"`
-	ProfileCiphertext []byte   `json:"profile_ciphertext"`
-	Devices           []Device `json:"devices"`
+	UserID   string `json:"user_id"`
+	Role     Role   `json:"role"`
+	TimeZone string `json:"time_zone"`
+	Status   string `json:"status"`
+	// Profile is the member's current profile version, if any.
+	Profile *Profile `json:"profile"`
+	Devices []Device `json:"devices"`
 }
 
 // Family is the view of a family returned to its members. It includes every
@@ -536,14 +537,14 @@ type Family struct {
 // Family returns the caller's family.
 func (s *Service) Family(ctx context.Context, p Principal) (Family, error) {
 	f := Family{ID: p.FamilyID, Members: []Member{}}
-	rows, err := s.pool.Query(ctx, `SELECT id, role, time_zone, status, profile_ciphertext
+	rows, err := s.pool.Query(ctx, `SELECT id, role, time_zone, status
 		FROM users WHERE family_id = $1 AND status <> 'removed' ORDER BY created_at, id`, p.FamilyID)
 	if err != nil {
 		return Family{}, err
 	}
 	members, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Member, error) {
 		m := Member{Devices: []Device{}}
-		return m, r.Scan(&m.UserID, &m.Role, &m.TimeZone, &m.Status, &m.ProfileCiphertext)
+		return m, r.Scan(&m.UserID, &m.Role, &m.TimeZone, &m.Status)
 	})
 	if err != nil {
 		return Family{}, err
@@ -571,6 +572,17 @@ func (s *Service) Family(ctx context.Context, p Principal) (Family, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return Family{}, err
+	}
+	ids := make([]string, len(members))
+	for i, m := range members {
+		ids[i] = m.UserID
+	}
+	profiles, err := CurrentProfiles(ctx, s.pool, ids)
+	if err != nil {
+		return Family{}, err
+	}
+	for i := range members {
+		members[i].Profile = profiles[members[i].UserID]
 	}
 	f.Members = members
 	return f, nil

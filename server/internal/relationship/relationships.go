@@ -30,10 +30,13 @@ type Relationship struct {
 	SuspendedByUs  bool   `json:"suspended_by_us"`
 	// RevocationReason is "parent", "child_block" or "connection_revoked"
 	// for revoked relationships.
-	RevocationReason string    `json:"revocation_reason,omitempty"`
-	RevokedByUs      bool      `json:"revoked_by_us"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	RevocationReason string `json:"revocation_reason,omitempty"`
+	RevokedByUs      bool   `json:"revoked_by_us"`
+	// Current profiles of both children, filled in by List and Get.
+	OurChildProfile   *identity.Profile `json:"our_child_profile,omitempty"`
+	OtherChildProfile *identity.Profile `json:"other_child_profile,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
 }
 
 // relRow is a relationships row.
@@ -418,6 +421,9 @@ func (s *Service) List(ctx context.Context, p identity.Principal) ([]Relationshi
 	for i, x := range xs {
 		out[i] = x.view(p.FamilyID)
 	}
+	if err := attachProfiles(ctx, s.pool, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -454,6 +460,11 @@ func (s *Service) Get(ctx context.Context, p identity.Principal, id string) (Det
 			return err
 		}
 		d.Relationship = x.view(p.FamilyID)
+		rs := []Relationship{d.Relationship}
+		if err := attachProfiles(ctx, tx, rs); err != nil {
+			return err
+		}
+		d.Relationship = rs[0]
 		pols, err := loadPolicies(ctx, tx, x)
 		if err != nil {
 			return err
@@ -696,6 +707,23 @@ func (s *Service) CloseProposal(ctx context.Context, p identity.Principal, propo
 	}
 	if tag.RowsAffected() == 0 {
 		return identity.ErrNotFound
+	}
+	return nil
+}
+
+// attachProfiles fills in the children's current profiles.
+func attachProfiles(ctx context.Context, q identity.Querier, rs []Relationship) error {
+	ids := make([]string, 0, 2*len(rs))
+	for _, r := range rs {
+		ids = append(ids, r.OurChildID, r.OtherChildID)
+	}
+	profiles, err := identity.CurrentProfiles(ctx, q, ids)
+	if err != nil {
+		return err
+	}
+	for i := range rs {
+		rs[i].OurChildProfile = profiles[rs[i].OurChildID]
+		rs[i].OtherChildProfile = profiles[rs[i].OtherChildID]
 	}
 	return nil
 }

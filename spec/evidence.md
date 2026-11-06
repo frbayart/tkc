@@ -18,6 +18,8 @@ Communication involving minors may later be needed as **evidence**: legal procee
 
 ## Versioned profiles
 
+Implemented: see [protocol/profiles.md](../protocol/profiles.md).
+
 A user's profile (display name, avatar, and other contact details) is **never modified in place**. Every change creates a new, immutable **profile version** linked to the previous one.
 
 - Each message records the **profile version of its sender at the time it was sent**.

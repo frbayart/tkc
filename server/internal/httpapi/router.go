@@ -39,6 +39,8 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("GET /v1/family", api.authed(api.family))
 		mux.Handle("POST /v1/users", api.authed(api.addUser))
 		mux.Handle("DELETE /v1/users/{id}", api.authed(api.removeUser))
+		mux.Handle("POST /v1/users/{id}/profiles", api.authed(api.createProfile))
+		mux.Handle("GET /v1/users/{id}/profiles", api.authed(api.profileHistory))
 		mux.Handle("POST /v1/users/{id}/enrollments", api.authed(api.createEnrollment))
 		mux.Handle("POST /v1/devices/{id}/approve", api.authed(api.approveDevice))
 		mux.Handle("POST /v1/devices/{id}/revoke", api.authed(api.revokeDevice))
