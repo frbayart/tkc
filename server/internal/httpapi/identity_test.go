@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/frbayart/tkc/server/internal/identity"
+	"github.com/frbayart/tkc/server/internal/relationship"
 	"github.com/frbayart/tkc/server/internal/store/storetest"
 )
 
@@ -21,9 +22,11 @@ type client struct {
 
 func newClient(t *testing.T) *client {
 	t.Helper()
+	pool := storetest.Pool(t)
 	api := &API{
-		Identity: identity.New(storetest.Pool(t)),
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Identity:      identity.New(pool),
+		Relationships: relationship.New(pool),
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	srv := httptest.NewServer(NewRouter(api))
 	t.Cleanup(srv.Close)

@@ -83,7 +83,10 @@ func uuidBytes(s string) ([]byte, error) {
 	return b, nil
 }
 
-func validID(s string) bool {
+// ValidID reports whether s is a canonical UUID string.
+func ValidID(s string) bool {
 	_, err := uuidBytes(s)
 	return err == nil
 }
+
+func validID(s string) bool { return ValidID(s) }

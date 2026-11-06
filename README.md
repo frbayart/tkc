@@ -47,6 +47,7 @@ The project is intended for Android and iOS phones and tablets. The reference cl
 - [Retention](spec/retention.md)
 - [Open Project Principles](docs/open-project.md)
 - [Device Enrollment and Authentication](protocol/device-auth.md)
+- [Family Connections](protocol/family-connections.md)
 - [Architecture Decision Records](docs/adr/)
 
 ## Repository layout

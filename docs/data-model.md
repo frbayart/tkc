@@ -19,6 +19,7 @@ erDiagram
     devices |o--o{ devices : "approved by"
     families ||--o{ family_connections : "family_a / family_b"
     families ||--o{ invitations : issues
+    invitations |o--o| family_connections : "accepted into"
     users |o--o{ invitations : "child (in-person exchange)"
     users ||--o{ relationships : "child_a / child_b"
     relationships ||--|{ relationship_policies : "one per family"
@@ -56,6 +57,8 @@ erDiagram
         uuid family_a FK "family_a < family_b"
         uuid family_b FK
         text status "pending | active | revoked"
+        uuid issuer_family FK "must confirm"
+        uuid invitation_id FK
     }
     invitations {
         uuid id PK
@@ -112,7 +115,7 @@ erDiagram
 |---|---|
 | `users` | role is `parent` or `child` |
 | `devices` | `revoked` ⇔ `revoked_at` set; identity keys are unique |
-| `family_connections` | one row per pair of families, canonical order `family_a < family_b` |
+| `family_connections` | one row per pair of families, canonical order `family_a < family_b`; the issuer is one of the pair; `active` requires `confirmed_at`; `revoked` ⇔ `revoked_at` |
 | `invitations` | only the token hash is stored; `child_exchange` ⇔ a child **of the issuer family**; cannot be both consumed and revoked; finite expiry |
 | `relationships` | each child belongs to the stated family; canonical order `child_a < child_b`; `active`/`suspended` require both parental approvals; at most one non-revoked relationship per pair |
 | `calls` | `authorized_until` (from the policy engine) is after the start; `ended_at` ⇔ `termination_reason` |

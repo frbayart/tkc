@@ -230,14 +230,29 @@ func TestSchemaConstraints(t *testing.T) {
 			VALUES ($1, $2, 'audio', now() + interval '20 minutes', now())`, relID, f.childA)
 		wantViolation(t, err)
 	})
+	t.Run("family connection issuer must be one of the pair", func(t *testing.T) {
+		lo, hi := f.familyA, f.familyB
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		var other string
+		if err := pool.QueryRow(ctx, `INSERT INTO families DEFAULT VALUES RETURNING id`).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		_, err := pool.Exec(ctx, `INSERT INTO family_connections (family_a, family_b, status, issuer_family, created_at, accepted_at, updated_at)
+			VALUES ($1, $2, 'pending', $3, now(), now(), now())`, lo, hi, other)
+		wantViolation(t, err)
+	})
 	t.Run("family connection canonical order", func(t *testing.T) {
 		lo, hi := f.familyA, f.familyB
 		if lo > hi {
 			lo, hi = hi, lo
 		}
-		_, err := pool.Exec(ctx, `INSERT INTO family_connections (family_a, family_b, status) VALUES ($1, $2, 'pending')`, hi, lo)
+		_, err := pool.Exec(ctx, `INSERT INTO family_connections (family_a, family_b, status, issuer_family, created_at, accepted_at, updated_at)
+			VALUES ($1, $2, 'pending', $1, now(), now(), now())`, hi, lo)
 		wantViolation(t, err)
-		if _, err := pool.Exec(ctx, `INSERT INTO family_connections (family_a, family_b, status) VALUES ($1, $2, 'pending')`, lo, hi); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO family_connections (family_a, family_b, status, issuer_family, created_at, accepted_at, updated_at)
+			VALUES ($1, $2, 'pending', $1, now(), now(), now())`, lo, hi); err != nil {
 			t.Fatal(err)
 		}
 	})
