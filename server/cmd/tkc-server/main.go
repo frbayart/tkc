@@ -16,6 +16,7 @@ import (
 
 	"github.com/frbayart/tkc/server/internal/httpapi"
 	"github.com/frbayart/tkc/server/internal/identity"
+	"github.com/frbayart/tkc/server/internal/relationship"
 	"github.com/frbayart/tkc/server/internal/store"
 )
 
@@ -54,8 +55,12 @@ func run(addr, dbURL string, migrate bool, logger *slog.Logger) error {
 	}
 
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           httpapi.NewRouter(&httpapi.API{Identity: identity.New(pool), Logger: logger}),
+		Addr: addr,
+		Handler: httpapi.NewRouter(&httpapi.API{
+			Identity:      identity.New(pool),
+			Relationships: relationship.New(pool),
+			Logger:        logger,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

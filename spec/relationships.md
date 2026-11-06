@@ -43,6 +43,8 @@ The exchange token should be short-lived and single-use.
 
 Parents may need to establish trust without meeting physically.
 
+The protocol is specified in [protocol/family-connections.md](../protocol/family-connections.md).
+
 A proposed mechanism is an out-of-band, deliberate invitation:
 
 1. Parent B generates a temporary invitation.
