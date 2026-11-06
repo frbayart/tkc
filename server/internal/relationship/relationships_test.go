@@ -1,6 +1,7 @@
 package relationship
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"testing"
 	"time"
@@ -657,5 +658,63 @@ func TestExpiredHoldStopsApplying(t *testing.T) {
 	// It can be placed again.
 	if _, err := e.rel.SetHold(ctx, pa, r.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOtherFamilySeesProfilesAsEvidence(t *testing.T) {
+	e := newEnv(t)
+	pa, pb := e.family(t), e.family(t)
+	ka := e.child(t, pa)
+	hugo := e.child(t, pb)
+
+	// Hugo's parent gives him a device and a profile.
+	code, _, _ := e.ids.CreateEnrollment(ctx, pb, hugo.UserID)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	enc := []byte("enc-key")
+	keys := identity.DeviceKeys{DeviceType: "phone", Platform: "ios", IdentityPublicKey: pub,
+		EncryptionPublicKey: enc, Proof: ed25519.Sign(priv, identity.ProofMessage(enc))}
+	devID, _, err := e.ids.Enroll(ctx, code, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ids.ApproveDevice(ctx, pb, devID, pub); err != nil {
+		t.Fatal(err)
+	}
+	hugo.DeviceID = devID
+	sign := func(version int, prev string, ct []byte) []byte {
+		msg, _ := identity.ProfileMessage(hugo.UserID, version, prev, ct)
+		return ed25519.Sign(priv, msg)
+	}
+	v1, err := e.ids.CreateProfile(ctx, hugo, hugo.UserID, "", []byte("enc(Hugo)"), sign(1, "", []byte("enc(Hugo)")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unrelated family: no access.
+	_, err = e.ids.ProfileHistory(ctx, pa, hugo.UserID)
+	mustErr(t, err, identity.ErrNotFound)
+
+	r := e.exchange(t, ka, hugo)
+	d, _ := e.rel.Get(ctx, pa, r.ID)
+	if d.OtherChildProfile == nil || d.OtherChildProfile.ID != v1.ID || d.OurChildProfile != nil {
+		t.Fatalf("profiles in relationship view %+v / %+v", d.OtherChildProfile, d.OurChildProfile)
+	}
+	if rs, _ := e.rel.List(ctx, pa); len(rs) != 1 || rs[0].OtherChildProfile == nil {
+		t.Fatalf("profiles in list %+v", rs)
+	}
+
+	v2ct := []byte("enc(Hugo2)")
+	if _, err := e.ids.CreateProfile(ctx, hugo, hugo.UserID, v1.ID, v2ct, sign(2, v1.ID, v2ct)); err != nil {
+		t.Fatal(err)
+	}
+
+	// After revocation and removal, the other family still sees the chain.
+	_ = e.rel.Revoke(ctx, pb, r.ID)
+	if err := e.ids.RemoveUser(ctx, pb, hugo.UserID); err != nil {
+		t.Fatal(err)
+	}
+	h, err := e.ids.ProfileHistory(ctx, pa, hugo.UserID)
+	if err != nil || len(h) != 2 || h[0].ID != v1.ID {
+		t.Fatalf("history seen by the other family %+v (%v)", h, err)
 	}
 }

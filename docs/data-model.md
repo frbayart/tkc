@@ -7,7 +7,7 @@ Draft — v0.1 — schema in `server/internal/store/migrations/`
 
 - **Random identifiers.** Every primary key is a random UUID. No username, phone number or e-mail is stored, and nothing is publicly enumerable.
 - **No secret material.** Devices store public keys only. Private keys never leave the device.
-- **No plaintext content.** Messages are opaque ciphertext envelopes; content type and attachment references are inside the ciphertext. User profiles (display names, avatars) are encrypted client-side.
+- **No plaintext content.** Messages are opaque ciphertext envelopes; content type and attachment references are inside the ciphertext. User profiles (display names, avatars) are encrypted client-side, as immutable signed versions (see [protocol/profiles.md](../protocol/profiles.md)).
 - **Database-enforced invariants.** Security-relevant rules are also enforced by constraints, so a bug in the application layer cannot create an invalid state.
 
 ## Entity-relationship diagram
@@ -16,6 +16,9 @@ Draft — v0.1 — schema in `server/internal/store/migrations/`
 erDiagram
     families ||--o{ users : "has members"
     users ||--o{ devices : owns
+    users ||--o{ user_profiles : "versions"
+    user_profiles |o--o| user_profiles : "previous / next"
+    user_profiles ||--o{ messages : "sent as"
     devices |o--o{ devices : "approved by"
     families ||--o{ family_connections : "family_a / family_b"
     families ||--o{ invitations : issues
@@ -43,9 +46,17 @@ erDiagram
         uuid family_id FK
         text role "parent | child"
         text time_zone "IANA"
-        bytea profile_ciphertext "client-side encrypted"
+        uuid current_profile_id FK
         text status "active | disabled | removed"
         timestamptz purge_after "end of evidence retention"
+    }
+    user_profiles {
+        uuid id PK
+        uuid user_id FK
+        int version
+        bytea ciphertext "client-side encrypted"
+        bytea signature "author device"
+        uuid previous_id FK
     }
     devices {
         uuid id PK
@@ -118,6 +129,7 @@ erDiagram
         uuid id PK
         uuid relationship_id FK
         uuid sender_device_id FK
+        uuid sender_profile_id FK "name at sending time"
         bytea ciphertext "opaque E2EE envelope"
         bytea crypto_metadata
     }
@@ -142,6 +154,7 @@ erDiagram
 
 | Table | Invariant |
 |---|---|
+| `user_profiles` | immutable: no update, no delete except with the user at purge; version 1 ⇔ no previous; one next per version; unique version per user |
 | `users` | role is `parent` or `child`; `removed` ⇔ `removed_at` and `purge_after` set, with `purge_after` after `removed_at` |
 | `devices` | `revoked` ⇔ `revoked_at` set; identity keys are unique |
 | `family_connections` | one row per pair of families, canonical order `family_a < family_b`; the issuer is one of the pair; `active` requires `confirmed_at`; `revoked` ⇔ `revoked_at` |

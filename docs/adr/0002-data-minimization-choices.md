@@ -9,7 +9,7 @@ The data model (`docs/data-model.md`) had to decide how user profiles and conver
 
 ## Decisions
 
-1. **Profiles are encrypted client-side.** Display names and avatars are stored only as `users.profile_ciphertext`, encrypted by the application for the members of the family and its authorized relationships. The server never knows a name.
+1. **Profiles are encrypted client-side.** Display names and avatars are stored only as encrypted profile versions (`user_profiles`, see amendment 2), encrypted by the application for the members of the family and its authorized relationships. The server never knows a name.
 2. **One conversation per relationship.** A child-to-child conversation is identified by its relationship (`messages.relationship_id`). There is no separate `conversations` table until group conversations are designed.
 
 ## Amendment — 2026-11-06
