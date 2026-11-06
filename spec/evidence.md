@@ -49,6 +49,8 @@ flowchart LR
 
 ## Event log
 
+Implemented: see [protocol/evidence-log.md](../protocol/evidence-log.md). Chains are kept per subject (member, relationship, connection, proposal) rather than per family, so that purging a subject never breaks another chain.
+
 Every security- or evidence-relevant change is appended to an **append-only event log**. Events are never updated or deleted, except by the purge at the end of the retention period.
 
 Recorded events include:

@@ -232,3 +232,45 @@ func TestProfilesHTTP(t *testing.T) {
 		t.Fatalf("family %+v", f)
 	}
 }
+
+func TestEvidenceHTTP(t *testing.T) {
+	c := newClient(t)
+	parentA, _ := c.newParent()
+	parentB, _ := c.newParent()
+	kidA, tokenKidA := c.newChild(parentA)
+	_, tokenKidB := c.newChild(parentB)
+
+	var ec relationship.ExchangeCode
+	c.expect(201, "POST", "/v1/exchange-codes", tokenKidA, nil, &ec)
+	var rel relationship.Relationship
+	c.expect(201, "POST", "/v1/exchange-codes/redeem", tokenKidB, map[string]string{"code": ec.Code}, &rel)
+	c.expect(200, "POST", "/v1/relationships/"+rel.ID+"/approve", parentA, policyJSON(true, 30), nil)
+
+	var tl struct {
+		Events []struct {
+			EventType string `json:"event_type"`
+		}
+		ChainValid bool `json:"chain_valid"`
+	}
+	c.expect(200, "GET", "/v1/relationships/"+rel.ID+"/events", parentB, nil, &tl)
+	if len(tl.Events) != 2 || !tl.ChainValid || tl.Events[1].EventType != "relationship_approved" {
+		t.Fatalf("timeline %+v", tl)
+	}
+	c.expect(403, "GET", "/v1/relationships/"+rel.ID+"/events", tokenKidA, nil, nil)
+
+	var pv struct{ Versions []relationship.PolicyVersion }
+	c.expect(200, "GET", "/v1/relationships/"+rel.ID+"/policy-versions", parentA, nil, &pv)
+	if len(pv.Versions) != 1 {
+		t.Fatalf("policy versions %+v", pv)
+	}
+	c.expect(200, "GET", "/v1/relationships/"+rel.ID+"/policy-versions", parentB, nil, &pv)
+	if len(pv.Versions) != 0 {
+		t.Fatalf("B sees A's policy versions %+v", pv)
+	}
+
+	c.expect(200, "GET", "/v1/users/"+kidA+"/events", parentA, nil, &tl)
+	if !tl.ChainValid || len(tl.Events) < 3 {
+		t.Fatalf("member timeline %+v", tl)
+	}
+	c.expect(404, "GET", "/v1/users/"+kidA+"/events", parentB, nil, nil)
+}
