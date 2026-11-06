@@ -97,7 +97,8 @@ Open points:
 
   Each family manages its own hold and only it can release it; the other family does not see it. A hold lasts **365 days by default and can be renewed**, so that none lasts forever by oversight (provisional value, pending legal review). When it ends, normal retention applies again.
 - **Message retention.** Messages are kept as long as their relationship exists (and therefore during the evidence retention period of a removed member). A technical maximum is likely to be introduced later; it must not apply while a preservation hold is active.
-- Whether a family may request earlier deletion of its own child's data (privacy rights) versus the other family's interest in evidence needs legal review.
+- **Deletion requests do not shorten evidence retention.** A family can delete its data from its own view and devices (and remove a member), but this never purges evidence earlier. **Even if both families agree**, evidence is kept until the end of the evidence retention period, to protect the child from the families' decisions. No API allows an early purge; only the scheduled purge deletes evidence, at the end of the period.
+- How this interacts with statutory erasure rights or a court order still needs legal review, possibly per jurisdiction.
 
 ## Open questions
 

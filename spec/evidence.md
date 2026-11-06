@@ -14,7 +14,7 @@ Communication involving minors may later be needed as **evidence**: legal procee
 3. **Evolution is kept.** Changes over time — renames, approvals, policy changes, suspensions, revocations, device changes — are recorded as they happened, not only their latest state.
 4. **Metadata matters.** Who did what, from which device, at what time, is kept alongside the encrypted content.
 5. **The provider still cannot read content.** Names and messages remain end-to-end encrypted; evidence is readable only by the devices of authorized parents. The provider keeps ciphertext and metadata, and guarantees they are not altered or deleted before the end of the retention period.
-6. Everything is purged at the end of the evidence retention period, not before.
+6. Everything is purged at the end of the evidence retention period, **not before — even if both families ask for it**. Evidence protects the child, including from the families' own decisions. A family can delete data from its own view, but that does not shorten the retention of evidence.
 
 ## Versioned profiles
 
@@ -63,7 +63,7 @@ Each event records: time, family, actor user, actor device, actor profile versio
 
 ### Integrity
 
-- The database rejects updates and deletes on the event log and on profile versions (only the retention purge may delete).
+- The database rejects updates and deletes on the event log and on profile versions (only the retention purge may delete). The same protection should be extended to accounts, relationships and messages, so that even a bug or an operator cannot purge evidence early.
 - Events are **hash-chained** per family: each event includes the hash of the previous one, so removing or altering an event breaks the chain and is detectable.
 - Signed client-side elements (profile versions, and later messages) let a parent verify that content was produced by the claimed device.
 
