@@ -26,6 +26,7 @@ erDiagram
     users |o--o{ invitations : "child (in-person exchange)"
     users ||--o{ relationships : "child_a / child_b"
     relationships ||--|{ relationship_policies : "one per family"
+    relationships ||--o{ relationship_policy_versions : "history"
     families ||--o{ family_notifications : receives
     relationships ||--o{ preservation_holds : "frozen by"
     relationships |o--o{ family_notifications : about
@@ -112,6 +113,20 @@ erDiagram
         timestamptz expires_at "renewable"
         timestamptz released_at
     }
+    evidence_events {
+        uuid subject_id "user, relationship, connection or proposal"
+        bigint seq
+        text event_type
+        text data "canonical JSON"
+        bytea prev_hash
+        bytea hash
+    }
+    relationship_policy_versions {
+        uuid relationship_id FK
+        uuid family_id "private to this family"
+        int version
+        jsonb policy
+    }
     family_notifications {
         uuid id PK
         uuid family_id FK
@@ -154,6 +169,8 @@ erDiagram
 
 | Table | Invariant |
 |---|---|
+| `evidence_events` | append-only, hash-chained per subject; deleted only once the subject is purged |
+| `relationship_policy_versions` | immutable; deleted only with the relationship |
 | `user_profiles` | immutable: no update, no delete except with the user at purge; version 1 ⇔ no previous; one next per version; unique version per user |
 | `users` | role is `parent` or `child`; `removed` ⇔ `removed_at` and `purge_after` set, with `purge_after` after `removed_at` |
 | `devices` | `revoked` ⇔ `revoked_at` set; identity keys are unique |
@@ -176,6 +193,10 @@ Encryption does not hide metadata. With this schema, the provider can see:
 - recording sizes and lifecycle dates.
 
 The provider **cannot** see names, profile pictures, message content, attachment content or media. Reducing the metadata above (e.g. sealed sender, padding) is tracked as future work in the threat model.
+
+## Database guards
+
+Migration `0010` adds triggers that refuse early deletion or alteration of evidence (accounts, relationships, messages, profiles, policy versions, events), even by a bug or a manual query. See [protocol/evidence-log.md](../protocol/evidence-log.md#database-guards).
 
 ## Authentication tables
 

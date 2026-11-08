@@ -205,3 +205,12 @@ func (a *API) profileHistory(w http.ResponseWriter, r *http.Request) {
 		Profiles []identity.Profile `json:"profiles"`
 	}{nonNil(ps)})
 }
+
+func (a *API) userEvents(w http.ResponseWriter, r *http.Request) {
+	v, err := a.Identity.UserEvents(r.Context(), principal(r), r.PathValue("id"))
+	if err != nil {
+		a.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"crypto/ed25519"
+	"strings"
 	"testing"
 	"time"
 )
@@ -221,4 +222,43 @@ func TestMessagesKeepTheSenderProfileVersion(t *testing.T) {
 	if sentAs != v1.ID {
 		t.Fatalf("message sent as %s, want %s", sentAs, v1.ID)
 	}
+}
+
+func TestMemberTimeline(t *testing.T) {
+	e := newProfileEnv(t)
+	s := e.s
+	ct := []byte("enc(Paul)")
+	if _, err := s.CreateProfile(ctx, e.child, e.childID, "", ct, signProfile(t, e.childD, e.childID, 1, "", ct)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeDevice(ctx, e.parent, e.child.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveUser(ctx, e.parent, e.childID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Still available after the removal, as evidence.
+	v, err := s.UserEvents(ctx, e.parent, e.childID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var types []string
+	for _, ev := range v.Events {
+		types = append(types, ev.Type)
+	}
+	want := "member_added,device_enrolled,device_approved,profile_version_created,device_revoked,member_removed"
+	if strings.Join(types, ",") != want || !v.ChainValid {
+		t.Fatalf("timeline %v valid=%v", types, v.ChainValid)
+	}
+	// Each event records the acting device.
+	if p := v.Events[3]; p.ActorDeviceID == nil || *p.ActorDeviceID != e.child.DeviceID {
+		t.Fatalf("profile event actor %+v", p)
+	}
+
+	_, err = s.UserEvents(ctx, e.child, e.childID)
+	mustErr(t, err, ErrForbidden)
+	other, _ := s.CreateFamily(ctx, "UTC", newDevice(t).keys)
+	_, err = s.UserEvents(ctx, other, e.childID)
+	mustErr(t, err, ErrNotFound)
 }

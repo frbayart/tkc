@@ -15,6 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/frbayart/tkc/server/internal/evidence"
 )
 
 // Role of a user in a family.
@@ -133,12 +135,17 @@ func (s *Service) CreateFamily(ctx context.Context, timeZone string, keys Device
 			VALUES ($1, 'parent', $2, $3) RETURNING id`, p.FamilyID, timeZone, now).Scan(&p.UserID); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO devices
+		if err := tx.QueryRow(ctx, `INSERT INTO devices
 			(user_id, device_type, platform, identity_public_key, encryption_public_key,
 			 status, registered_at, activated_at)
 			VALUES ($1, $2, $3, $4, $5, 'active', $6, $6) RETURNING id`,
 			p.UserID, keys.DeviceType, keys.Platform, keys.IdentityPublicKey, keys.EncryptionPublicKey, now,
-		).Scan(&p.DeviceID)
+		).Scan(&p.DeviceID); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, evidence.Actor{UserID: p.UserID, DeviceID: p.DeviceID},
+			userEvent(p.UserID, "member_added", map[string]any{"family_id": p.FamilyID, "role": "parent", "founder": true}),
+			userEvent(p.UserID, "device_activated", deviceData(p.DeviceID, keys)))
 	})
 	if isUniqueViolation(err) {
 		return Principal{}, fmt.Errorf("%w: identity key already registered", ErrConflict)
@@ -158,8 +165,15 @@ func (s *Service) AddUser(ctx context.Context, p Principal, role Role, timeZone 
 		return "", err
 	}
 	var id string
-	err := s.pool.QueryRow(ctx, `INSERT INTO users (family_id, role, time_zone, created_at)
-		VALUES ($1, $2, $3, $4) RETURNING id`, p.FamilyID, role, timeZone, s.Now()).Scan(&id)
+	now := s.Now()
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO users (family_id, role, time_zone, created_at)
+			VALUES ($1, $2, $3, $4) RETURNING id`, p.FamilyID, role, timeZone, now).Scan(&id); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p),
+			userEvent(id, "member_added", map[string]any{"family_id": p.FamilyID, "role": string(role)}))
+	})
 	return id, err
 }
 
@@ -216,9 +230,12 @@ func (s *Service) Enroll(ctx context.Context, code string, keys DeviceKeys) (dev
 		).Scan(&deviceID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE device_enrollments SET consumed_at = $2, device_id = $3 WHERE id = $1`,
-			enrollmentID, now, deviceID)
-		return err
+		if _, err = tx.Exec(ctx, `UPDATE device_enrollments SET consumed_at = $2, device_id = $3 WHERE id = $1`,
+			enrollmentID, now, deviceID); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, now, evidence.Actor{DeviceID: deviceID},
+			userEvent(userID, "device_enrolled", deviceData(deviceID, keys)))
 	})
 	if isUniqueViolation(err) {
 		return "", "", fmt.Errorf("%w: identity key already registered", ErrConflict)
@@ -254,9 +271,13 @@ func (s *Service) ApproveDevice(ctx context.Context, p Principal, deviceID strin
 		if string(key) != string(expectedIdentityKey) {
 			return ErrKeyMismatch
 		}
-		_, err = tx.Exec(ctx, `UPDATE devices SET status = 'active', activated_at = $2, approved_by_device_id = $3
-			WHERE id = $1`, deviceID, s.Now(), p.DeviceID)
-		return err
+		var owner string
+		if err := tx.QueryRow(ctx, `UPDATE devices SET status = 'active', activated_at = $2, approved_by_device_id = $3
+			WHERE id = $1 RETURNING user_id`, deviceID, s.Now(), p.DeviceID).Scan(&owner); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, s.Now(), actorOf(p),
+			userEvent(owner, "device_approved", map[string]any{"device_id": deviceID, "approved_by_device_id": p.DeviceID}))
 	})
 }
 
@@ -300,12 +321,16 @@ func (s *Service) RevokeDevice(ctx context.Context, p Principal, deviceID string
 				return ErrLastParentDevice
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE devices SET status = 'revoked', revoked_at = $2 WHERE id = $1`,
-			deviceID, s.Now()); err != nil {
+		var owner string
+		if err := tx.QueryRow(ctx, `UPDATE devices SET status = 'revoked', revoked_at = $2 WHERE id = $1
+			RETURNING user_id`, deviceID, s.Now()).Scan(&owner); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM sessions WHERE device_id = $1`, deviceID)
-		return err
+		if _, err = tx.Exec(ctx, `DELETE FROM sessions WHERE device_id = $1`, deviceID); err != nil {
+			return err
+		}
+		return evidence.Append(ctx, tx, s.Now(), actorOf(p),
+			userEvent(owner, "device_revoked", map[string]any{"device_id": deviceID}))
 	})
 }
 
@@ -365,18 +390,34 @@ func (s *Service) RemoveUser(ctx context.Context, p Principal, userID string) er
 			{`UPDATE invitations SET revoked_at = $2
 				WHERE (issuer_user_id = $1 OR child_id = $1) AND consumed_at IS NULL AND revoked_at IS NULL`,
 				[]any{userID, now}},
-			{`UPDATE relationships SET status = 'revoked', revoked_at = $2, updated_at = $2, suspended_by = NULL,
-				revoked_by_family = $3, revocation_reason = 'member_removed'
-				WHERE $1 IN (child_a, child_b) AND status <> 'revoked'`, []any{userID, now, p.FamilyID}},
-			{`UPDATE relationship_proposals SET status = 'cancelled', updated_at = $2
-				WHERE (proposer_child = $1 OR proposer_user = $1) AND status = 'pending'`, []any{userID, now}},
 		}
 		for _, st := range steps {
 			if _, err := tx.Exec(ctx, st.sql, st.args...); err != nil {
 				return err
 			}
 		}
-		return nil
+		events := []evidence.Entry{userEvent(userID, "member_removed",
+			map[string]any{"purge_after": now.Add(s.evidenceRetention()).UTC().Format(time.RFC3339)})}
+		rels, err := collectIDs(ctx, tx, `UPDATE relationships SET status = 'revoked', revoked_at = $2, updated_at = $2,
+			suspended_by = NULL, revoked_by_family = $3, revocation_reason = 'member_removed'
+			WHERE $1 IN (child_a, child_b) AND status <> 'revoked' RETURNING id`, userID, now, p.FamilyID)
+		if err != nil {
+			return err
+		}
+		for _, id := range rels {
+			events = append(events, evidence.Entry{SubjectType: evidence.SubjectRelationship, SubjectID: id,
+				Type: "relationship_revoked", Data: map[string]any{"reason": "member_removed", "by_family": p.FamilyID}})
+		}
+		props, err := collectIDs(ctx, tx, `UPDATE relationship_proposals SET status = 'cancelled', updated_at = $2
+			WHERE (proposer_child = $1 OR proposer_user = $1) AND status = 'pending' RETURNING id`, userID, now)
+		if err != nil {
+			return err
+		}
+		for _, id := range props {
+			events = append(events, evidence.Entry{SubjectType: evidence.SubjectProposal, SubjectID: id,
+				Type: "proposal_cancelled", Data: map[string]any{"reason": "member_removed"}})
+		}
+		return evidence.Append(ctx, tx, now, actorOf(p), events...)
 	})
 }
 
@@ -398,13 +439,28 @@ func (s *Service) evidenceRetention() time.Duration {
 func (s *Service) PurgeRemovedMembers(ctx context.Context) (int64, error) {
 	// Members involved in a relationship under an active preservation hold
 	// are kept until the hold is released or expires.
-	tag, err := s.pool.Exec(ctx, `DELETE FROM users u WHERE u.status = 'removed' AND u.purge_after <= $1
-		AND NOT EXISTS (SELECT 1 FROM preservation_holds h JOIN relationships r ON r.id = h.relationship_id
-			WHERE h.released_at IS NULL AND h.expires_at > $1 AND u.id IN (r.child_a, r.child_b))`, s.Now())
+	// The database guards (migration 0010) evaluate the same rules with the
+	// clock given in tkc.clock.
+	now := s.Now()
+	var n int64
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('tkc.clock', $1, true)`, now.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM users u WHERE u.status = 'removed' AND u.purge_after <= $1
+			AND NOT EXISTS (SELECT 1 FROM preservation_holds h JOIN relationships r ON r.id = h.relationship_id
+				WHERE h.released_at IS NULL AND h.expires_at > $1 AND u.id IN (r.child_a, r.child_b))`, now)
+		if err != nil {
+			return err
+		}
+		n = tag.RowsAffected()
+		_, err = evidence.PurgeOrphans(ctx, tx)
+		return err
+	})
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	return n, nil
 }
 
 // Challenge returns a single-use nonce for deviceID to sign. To avoid
@@ -586,4 +642,28 @@ func (s *Service) Family(ctx context.Context, p Principal) (Family, error) {
 	}
 	f.Members = members
 	return f, nil
+}
+
+func actorOf(p Principal) evidence.Actor {
+	return evidence.Actor{UserID: p.UserID, DeviceID: p.DeviceID}
+}
+
+func userEvent(userID, typ string, data map[string]any) evidence.Entry {
+	return evidence.Entry{SubjectType: evidence.SubjectUser, SubjectID: userID, Type: typ, Data: data}
+}
+
+func deviceData(deviceID string, k DeviceKeys) map[string]any {
+	return map[string]any{
+		"device_id": deviceID, "device_type": k.DeviceType, "platform": k.Platform,
+		"identity_public_key": k.IdentityPublicKey,
+	}
+}
+
+// collectIDs runs a statement returning one id column.
+func collectIDs(ctx context.Context, tx pgx.Tx, sql string, args ...any) ([]string, error) {
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }

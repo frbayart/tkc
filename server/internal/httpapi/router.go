@@ -41,6 +41,7 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("DELETE /v1/users/{id}", api.authed(api.removeUser))
 		mux.Handle("POST /v1/users/{id}/profiles", api.authed(api.createProfile))
 		mux.Handle("GET /v1/users/{id}/profiles", api.authed(api.profileHistory))
+		mux.Handle("GET /v1/users/{id}/events", api.authed(api.userEvents))
 		mux.Handle("POST /v1/users/{id}/enrollments", api.authed(api.createEnrollment))
 		mux.Handle("POST /v1/devices/{id}/approve", api.authed(api.approveDevice))
 		mux.Handle("POST /v1/devices/{id}/revoke", api.authed(api.revokeDevice))
@@ -55,6 +56,7 @@ func NewRouter(api *API) http.Handler {
 		mux.Handle("POST /v1/family-connections/{id}/confirm", api.authed(api.confirmFamilyConnection))
 		mux.Handle("POST /v1/family-connections/{id}/revoke", api.authed(api.revokeFamilyConnection))
 		mux.Handle("POST /v1/family-connections/{id}/proposals", api.authed(api.proposeRelationship))
+		mux.Handle("GET /v1/family-connections/{id}/events", api.authed(api.connectionEvents))
 
 		mux.Handle("GET /v1/relationship-proposals", api.authed(api.listProposals))
 		mux.Handle("POST /v1/relationship-proposals/{id}/accept", api.authed(api.acceptProposal))
@@ -65,6 +67,8 @@ func NewRouter(api *API) http.Handler {
 
 		mux.Handle("GET /v1/relationships", api.authed(api.listRelationships))
 		mux.Handle("GET /v1/relationships/{id}", api.authed(api.getRelationship))
+		mux.Handle("GET /v1/relationships/{id}/events", api.authed(api.relationshipEvents))
+		mux.Handle("GET /v1/relationships/{id}/policy-versions", api.authed(api.policyVersions))
 		mux.Handle("POST /v1/relationships/{id}/approve", api.authed(api.approveRelationship))
 		mux.Handle("PUT /v1/relationships/{id}/policy", api.authed(api.updateRelationshipPolicy))
 		mux.Handle("POST /v1/relationships/{id}/suspend", api.authed(api.noContent(api.suspendRelationship)))
